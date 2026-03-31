@@ -316,10 +316,4 @@ Make explainable, auditable decisions (every action is logged with reasoning)
 
 The architecture mirrors what production agentic systems look like at scale — an orchestrator delegating to specialized tools — making it directly relevant to modern AI engineering roles.
 
-📜 License
-MIT License — free to use, fork, and build on.
 
-
-Built as a portfolio project demonstrating agentic AI system design.
-Stack: Java 21 + Spring Boot · Python 3.11 · Anthropic Claude API
-Share(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.nonce='Lfczs8cAYRVbFG+Cxk1wLw==';d.innerHTML="window.__CF$cv$params={r:'9e46f14ae90c3b2d',t:'MTc3NDg3MTkwNy4wMDAwMDA='};var a=document.createElement('script');a.nonce='Lfczs8cAYRVbFG+Cxk1wLw==';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();
