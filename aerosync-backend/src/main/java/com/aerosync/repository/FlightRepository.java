@@ -13,4 +13,6 @@ public interface FlightRepository extends JpaRepository<Flight, Long> {
     List<Flight> findByStatus(FlightStatus status);
     List<Flight> findByRiskLevel(String riskLevel);
     List<Flight> findByOriginAndDestination(String origin, String destination);
+    List<Flight> findByOriginAndStatus(
+            String origin, Flight.FlightStatus status);
 }

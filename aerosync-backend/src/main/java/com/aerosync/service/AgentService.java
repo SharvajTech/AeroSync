@@ -43,19 +43,26 @@ public class AgentService {
     // Spring injects all dependencies here automatically.
     // @Qualifier tells Spring which WebClient bean to inject
     // since we have two beans — mlWebClient and geminiWebClient
+    private final ResolutionAlgorithmService resolutionAlgorithmService;
+    private final CascadeService             cascadeService;
+
     public AgentService(
             FlightRepository flightRepository,
             GateRepository gateRepository,
             CrewRepository crewRepository,
             DisruptionRepository disruptionRepository,
             DisruptionService disruptionService,
+            ResolutionAlgorithmService resolutionAlgorithmService,
+            CascadeService cascadeService,
             @Qualifier("geminiWebClient") WebClient geminiWebClient) {
-        this.flightRepository     = flightRepository;
-        this.gateRepository       = gateRepository;
-        this.crewRepository       = crewRepository;
-        this.disruptionRepository = disruptionRepository;
-        this.disruptionService    = disruptionService;
-        this.geminiWebClient      = geminiWebClient;
+        this.flightRepository           = flightRepository;
+        this.gateRepository             = gateRepository;
+        this.crewRepository             = crewRepository;
+        this.disruptionRepository       = disruptionRepository;
+        this.disruptionService          = disruptionService;
+        this.resolutionAlgorithmService = resolutionAlgorithmService;
+        this.cascadeService             = cascadeService;
+        this.geminiWebClient            = geminiWebClient;
     }
 
 
@@ -69,64 +76,124 @@ public class AgentService {
     // 5. Apply gate/crew changes to DB
     // 6. Save resolution as JSONB
     // 7. Return resolution to frontend
+    // ── UPDATED MAIN ENTRY POINT ──────────────────────────────────────────────
+// Hybrid flow:
+// 1. Algorithm makes all decisions (fast, reliable, rule-based)
+// 2. Gemini ONLY generates human-readable explanation
+// 3. Cascade handled by CascadeService
     public Map<String, Object> resolveDisruption(Long disruptionId) {
 
         long startTime = System.currentTimeMillis();
 
-        // Load disruption record from PostgreSQL
         Disruption disruption = disruptionRepository
                 .findById(disruptionId)
                 .orElseThrow(() -> new RuntimeException(
                         "Disruption not found: " + disruptionId));
 
-        // Load the affected flight using flightId stored in disruption
         Flight flight = flightRepository
                 .findByFlightId(disruption.getFlightId())
                 .orElseThrow(() -> new RuntimeException(
                         "Flight not found: " + disruption.getFlightId()));
 
-        // Load current airport state — what is available right now
-        List<Gate> availableGates = gateRepository.findByAvailableTrue();
-        List<Crew> availableCrew  = crewRepository.findByAvailableTrue();
+        log.info("🤖 Hybrid Resolution — disruption: {} flight: {}",
+                disruptionId, flight.getFlightId());
 
-        log.info("🤖 Orchestrator Agent activated");
-        log.info("   Disruption ID : {}", disruptionId);
-        log.info("   Flight        : {}", flight.getFlightId());
-        log.info("   Type          : {}", disruption.getType());
-        log.info("   Available gates: {}", availableGates.size());
-        log.info("   Available crew : {}", availableCrew.size());
+        // STEP 1 — Algorithm makes all decisions
+        // Fast, deterministic, no API call needed
+        Map<String, Object> algorithmicResolution =
+                resolutionAlgorithmService
+                        .resolveAlgorithmically(disruption, flight);
 
-        // Call Gemini — this is the core AI decision making step
-        String rawResponse = callOrchestratorAgent(
-                disruption, flight, availableGates, availableCrew);
+        log.info("✅ Algorithmic resolution complete");
 
-        // Parse response and apply DB changes
-        Map<String, Object> resolution =
-                parseAndApplyResolution(rawResponse, flight);
+        // STEP 2 — Gemini generates plain-English explanation
+        // Only called for explanation — not for decisions
+        // If Gemini fails, algorithmic resolution still stands
+        String explanation = generateExplanation(
+                algorithmicResolution, disruption, flight);
+        algorithmicResolution.put("ai_explanation", explanation);
 
-        // Add metadata to resolution
+        // STEP 3 — Handle cascade (connected flights)
+        Map<String, Object> cascadeResult =
+                cascadeService.resolveCascade(
+                        flight.getFlightId(),
+                        disruption.getDelayMinutes() != null
+                                ? disruption.getDelayMinutes() : 60);
+        algorithmicResolution.put("cascade_result", cascadeResult);
+
+        // STEP 4 — Add metadata
         long resolutionTimeMs = System.currentTimeMillis() - startTime;
-        resolution.put("resolution_time_ms", resolutionTimeMs);
-        resolution.put("disruption_id",      disruptionId);
-        resolution.put("flight_id",          flight.getFlightId());
-        resolution.put("resolved_at",        LocalDateTime.now().toString());
-        resolution.put("model_used",         geminiModel);
+        algorithmicResolution.put("resolution_time_ms", resolutionTimeMs);
+        algorithmicResolution.put("disruption_id",      disruptionId);
+        algorithmicResolution.put("flight_id",          flight.getFlightId());
+        algorithmicResolution.put("resolved_at",
+                LocalDateTime.now().toString());
+        algorithmicResolution.put("model_used",
+                geminiModel + "+algorithm");
 
-        // Persist complete resolution as JSONB in PostgreSQL
-        // This creates the audit trail
+        // STEP 5 — Persist to DB
         try {
-            String resolutionJson =
-                    objectMapper.writeValueAsString(resolution);
+            String json = objectMapper
+                    .writeValueAsString(algorithmicResolution);
             disruptionService.markResolved(
-                    disruptionId, resolutionJson, resolutionTimeMs);
+                    disruptionId, json, resolutionTimeMs);
         } catch (Exception e) {
-            log.error("Failed to persist resolution JSON: {}",
-                    e.getMessage());
+            log.error("Failed to persist resolution: {}", e.getMessage());
         }
 
-        log.info("✅ Disruption {} resolved in {}ms",
-                disruptionId, resolutionTimeMs);
-        return resolution;
+        log.info("✅ Hybrid resolution complete in {}ms", resolutionTimeMs);
+        return algorithmicResolution;
+    }
+
+
+    // Gemini is now ONLY called for explanation generation
+// Not for decision making — decisions are algorithmic
+    @SuppressWarnings("unchecked")
+    private String generateExplanation(
+            Map<String, Object> resolution,
+            Disruption disruption,
+            Flight flight) {
+        try {
+            Map<String, Object> gateRes =
+                    (Map<String, Object>) resolution.get("gate_resolution");
+            Map<String, Object> crewRes =
+                    (Map<String, Object>) resolution.get("crew_resolution");
+            Map<String, Object> paxRes  =
+                    (Map<String, Object>) resolution.get("passenger_resolution");
+
+            String prompt = String.format(
+                    "You are an aviation operations AI. "
+                            + "Explain this disruption resolution in plain English "
+                            + "for airline operations staff. Keep it under 60 words. "
+                            + "Be specific about what changed and why.\n\n"
+                            + "Flight: %s | Route: %s→%s | Type: %s | Delay: %dmin\n"
+                            + "Gate: %s | Crew: %s | Passengers: %s\n"
+                            + "Respond with one clear paragraph only.",
+                    flight.getFlightId(),
+                    flight.getOrigin(), flight.getDestination(),
+                    disruption.getType(),
+                    disruption.getDelayMinutes() != null
+                            ? disruption.getDelayMinutes() : 0,
+                    gateRes != null ? gateRes.get("action") + " " +
+                            gateRes.get("reason") : "unchanged",
+                    crewRes != null ? crewRes.get("action") + " " +
+                            crewRes.get("reason") : "unchanged",
+                    paxRes != null ? paxRes.get("action") + " " +
+                            paxRes.get("affected_count") + " pax" : "no action"
+            );
+
+            return callGeminiApi(prompt);
+        } catch (Exception e) {
+            log.warn("Explanation generation failed: {}", e.getMessage());
+            // Fallback explanation built from algorithm results
+            List<Object> actions =
+                    (List<Object>) resolution.get("actions_taken");
+            return "Disruption on " + flight.getFlightId()
+                    + " resolved algorithmically. Actions: "
+                    + (actions != null ? String.join(", ",
+                    actions.stream().map(Object::toString).toList())
+                    : "see details above");
+        }
     }
 
 

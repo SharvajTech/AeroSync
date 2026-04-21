@@ -17,13 +17,17 @@ public class DataSeederService implements CommandLineRunner {
     private final FlightRepository     flightRepository;
     private final GateRepository       gateRepository;
     private final CrewRepository       crewRepository;
+    private final ScheduleGeneratorService scheduleGeneratorService;
 
     @Override
     public void run(String... args) {
         seedGates();
         seedCrew();
-        seedFlights();
-        log.info("✅ Airport data seeded successfully");
+        // Use schedule generator instead of hardcoded flights
+        if (flightRepository.count() == 0) {
+            scheduleGeneratorService.generateDailySchedule();
+        }
+        log.info("✅ Airport data initialized");
     }
 
     private void seedGates() {
