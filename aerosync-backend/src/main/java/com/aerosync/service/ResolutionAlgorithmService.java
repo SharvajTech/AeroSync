@@ -530,4 +530,213 @@ public class ResolutionAlgorithmService {
     private double round(double v) {
         return Math.round(v * 10.0) / 10.0;
     }
+    // ── PROPOSE ONLY — does NOT apply to database ─────────────────────────────
+    // Used by agentic propose/approve flow.
+    // Identical to resolveAlgorithmically() but skips the applyGateChange
+    // and applyCrewChange database writes.
+    // Human must approve before anything is written.
+    public Map<String, Object> proposeOnly(
+            Disruption disruption, Flight flight) {
+
+        log.info("📋 Proposing resolution for flight {} "
+               + "(not applying yet)", flight.getFlightId());
+
+        Map<String, Object> proposal = new LinkedHashMap<>();
+        List<String> actionsLog = new ArrayList<>();
+
+        // Run rule engine — same as normal resolution
+        Map<String, Object> ruleCheck = runRuleEngine(flight);
+        proposal.put("rule_violations", ruleCheck.get("violations"));
+        proposal.put("rule_status",     ruleCheck.get("status"));
+
+        // Gate proposal — score and select but DO NOT write to DB
+        Map<String, Object> gateRes = resolveGate(
+            flight, disruption.getType());
+        proposal.put("gate_resolution", gateRes);
+        if ("REASSIGNED".equals(gateRes.get("action"))) {
+            actionsLog.add("Gate reassign: "
+                + flight.getAssignedGate()
+                + " → " + gateRes.get("new_gate"));
+        }
+
+        // Crew proposal — score and select but DO NOT write to DB
+        Map<String, Object> crewRes = resolveCrew(
+            flight, disruption.getType());
+        proposal.put("crew_resolution", crewRes);
+        if ("SWAPPED".equals(crewRes.get("action"))) {
+            actionsLog.add("Crew swap: "
+                + flight.getAssignedCrewId()
+                + " → " + crewRes.get("new_crew_id"));
+        }
+
+        // Passenger and aircraft proposals
+        proposal.put("passenger_resolution",
+            resolvePassengers(flight, disruption));
+        proposal.put("aircraft_resolution",
+            resolveAircraft(flight, disruption.getType()));
+
+        // Delay and cost estimates
+        int estimatedDelay = estimateRemainingDelay(
+            flight, disruption, gateRes, crewRes);
+        double costImpact = estimatedDelay * 150.0
+            + (disruption.getPassengersAffected() != null
+               ? disruption.getPassengersAffected() * 30.0 : 0);
+
+        proposal.put("estimated_new_delay_mins", estimatedDelay);
+        proposal.put("total_cost_impact",        costImpact);
+        proposal.put("actions_proposed",         actionsLog);
+        proposal.put("severity",
+            estimatedDelay > 120 ? "CRITICAL" :
+            estimatedDelay > 60  ? "HIGH" :
+            estimatedDelay > 30  ? "MEDIUM" : "LOW");
+        proposal.put("confidence_score",    0.95);
+        proposal.put("resolution_method",   "ALGORITHMIC_PROPOSAL");
+        proposal.put("pending_approval",    true);
+
+        log.info("📋 Proposal ready — {} actions proposed, "
+               + "awaiting human approval", actionsLog.size());
+        return proposal;
+    }
+
+
+    // ── APPLY APPROVED RESOLUTION — writes to database ───────────────────────
+    // Called after human approves the proposal.
+    // Takes the proposal map (possibly modified by human) and applies it.
+    @SuppressWarnings("unchecked")
+    public void applyResolution(
+            Map<String, Object> approvedResolution, Flight flight) {
+
+        log.info("✅ Applying approved resolution for flight {}",
+                flight.getFlightId());
+
+        // Apply gate change if proposed
+        Map<String, Object> gateRes =
+            (Map<String, Object>) approvedResolution
+                .get("gate_resolution");
+        if (gateRes != null
+                && "REASSIGNED".equals(gateRes.get("action"))) {
+            String newGate = (String) gateRes.get("new_gate");
+            if (newGate != null && !newGate.equals("null")) {
+                applyGateChange(flight, newGate);
+            }
+        }
+
+        // Apply crew change if proposed
+        Map<String, Object> crewRes =
+            (Map<String, Object>) approvedResolution
+                .get("crew_resolution");
+        if (crewRes != null
+                && "SWAPPED".equals(crewRes.get("action"))) {
+            String newCrew = (String) crewRes.get("new_crew_id");
+            if (newCrew != null && !newCrew.equals("null")) {
+                applyCrewChange(flight, newCrew);
+            }
+        }
+
+        log.info("✅ Resolution applied to database for flight {}",
+                flight.getFlightId());
+    }
+
+
+    // ── RESOLVE WITH CONSTRAINT ───────────────────────────────────────────────
+    // Called when human rejects a proposal with a reason.
+    // Re-runs algorithm with the rejection reason as a constraint.
+    // Example: reason = "CR-001 is unavailable today"
+    //          → algorithm excludes CR-001 from crew candidates
+    public Map<String, Object> resolveWithConstraint(
+            Disruption disruption,
+            Flight flight,
+            String rejectionReason) {
+
+        log.info("🔄 Re-resolving with constraint: {}", rejectionReason);
+
+        // Parse rejection reason for crew exclusions
+        String excludeCrewId = null;
+        String excludeGate   = null;
+
+        if (rejectionReason != null) {
+            // Extract crew ID pattern like "CR-001"
+            java.util.regex.Matcher crewMatcher =
+                java.util.regex.Pattern
+                    .compile("CR-\\d+")
+                    .matcher(rejectionReason);
+            if (crewMatcher.find()) {
+                excludeCrewId = crewMatcher.group();
+                log.info("Excluding crew: {}", excludeCrewId);
+            }
+
+            // Extract gate pattern like "A1" or "B3"
+            java.util.regex.Matcher gateMatcher =
+                java.util.regex.Pattern
+                    .compile("[A-C]\\d")
+                    .matcher(rejectionReason);
+            if (gateMatcher.find()) {
+                excludeGate = gateMatcher.group();
+                log.info("Excluding gate: {}", excludeGate);
+            }
+        }
+
+        // Run proposal with exclusions
+        // We temporarily mark excluded resources as unavailable
+        boolean crewMarked = false;
+        boolean gateMarked = false;
+
+        // Temporarily mark excluded crew unavailable
+        if (excludeCrewId != null) {
+            final String finalCrewId = excludeCrewId;
+            crewRepository.findAll().stream()
+                .filter(c -> c.getCrewId().equals(finalCrewId))
+                .findFirst()
+                .ifPresent(c -> {
+                    c.setAvailable(false);
+                    crewRepository.save(c);
+                });
+            crewMarked = true;
+        }
+
+        // Temporarily mark excluded gate unavailable
+        if (excludeGate != null) {
+            final String finalGate = excludeGate;
+            gateRepository.findAll().stream()
+                .filter(g -> g.getGateNumber().equals(finalGate))
+                .findFirst()
+                .ifPresent(g -> {
+                    g.setAvailable(false);
+                    gateRepository.save(g);
+                });
+            gateMarked = true;
+        }
+
+        // Generate revised proposal
+        Map<String, Object> revised = proposeOnly(disruption, flight);
+        revised.put("rejection_reason",   rejectionReason);
+        revised.put("excluded_crew",      excludeCrewId);
+        revised.put("excluded_gate",      excludeGate);
+        revised.put("iteration",          2);
+
+        // Restore temporarily excluded resources
+        if (crewMarked && excludeCrewId != null) {
+            final String finalCrewId = excludeCrewId;
+            crewRepository.findAll().stream()
+                .filter(c -> c.getCrewId().equals(finalCrewId))
+                .findFirst()
+                .ifPresent(c -> {
+                    c.setAvailable(true);
+                    crewRepository.save(c);
+                });
+        }
+        if (gateMarked && excludeGate != null) {
+            final String finalGate = excludeGate;
+            gateRepository.findAll().stream()
+                .filter(g -> g.getGateNumber().equals(finalGate))
+                .findFirst()
+                .ifPresent(g -> {
+                    g.setAvailable(true);
+                    gateRepository.save(g);
+                });
+        }
+
+        log.info("🔄 Revised proposal ready with constraints applied");
+        return revised;
+    }
 }

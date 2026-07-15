@@ -46,6 +46,6 @@ public class Disruption {
     }
 
     public enum DisruptionStatus {
-        DETECTED, RESOLVING, RESOLVED, FAILED
+        DETECTED, RESOLVING, RESOLVED, FAILED, PROPOSED
     }
 }

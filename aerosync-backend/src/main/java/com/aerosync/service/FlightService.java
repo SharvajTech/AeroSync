@@ -5,9 +5,11 @@ import com.aerosync.model.Flight;
 import com.aerosync.repository.FlightRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -16,85 +18,116 @@ public class FlightService {
 
     private final FlightRepository flightRepository;
     private final MLService        mlService;
+    private final WeatherService   weatherService;
 
-    // Get all flights
     public List<Flight> getAllFlights() {
         return flightRepository.findAll();
     }
 
-    // Get single flight
     public Flight getFlightById(String flightId) {
         return flightRepository.findByFlightId(flightId)
                 .orElseThrow(() ->
-                        new RuntimeException("Flight not found: " + flightId));
+                    new RuntimeException("Flight not found: " + flightId));
     }
 
-    // Get flights by risk level
     public List<Flight> getFlightsByRisk(String riskLevel) {
         return flightRepository.findByRiskLevel(riskLevel.toUpperCase());
     }
 
-    // Get disrupted flights
     public List<Flight> getDisruptedFlights() {
-        return flightRepository.findByStatus(Flight.FlightStatus.DISRUPTED);
+        return flightRepository
+                .findByStatus(Flight.FlightStatus.DISRUPTED);
     }
 
-    // Create a new flight and immediately get ML prediction
     public Flight createFlight(Flight flight) {
         flight.setCreatedAt(LocalDateTime.now());
         flight.setUpdatedAt(LocalDateTime.now());
         flight.setStatus(Flight.FlightStatus.SCHEDULED);
 
-        // Save first to get ID
+        // Get live weather score for origin airport
+        if (flight.getOrigin() != null) {
+            int liveWeather = weatherService
+                    .getWeatherScore(flight.getOrigin());
+            flight.setWeatherScore(liveWeather);
+            log.info("Live weather for {}: score={}",
+                    flight.getOrigin(), liveWeather);
+        }
+
         Flight saved = flightRepository.save(flight);
 
-        // Call ML service for prediction
+        // ML prediction
         try {
-            FlightPredictionResponse prediction =
-                    mlService.predict(mlService.buildRequest(saved));
-
-            saved.setDelayProbability(prediction.getDelayProbability());
-            saved.setRiskLevel(prediction.getRiskLevel());
-            saved.setPredictedDelayed(prediction.getPredictedDelayed());
+            FlightPredictionResponse pred =
+                mlService.predict(mlService.buildRequest(saved));
+            saved.setDelayProbability(pred.getDelayProbability());
+            saved.setRiskLevel(pred.getRiskLevel());
+            saved.setPredictedDelayed(pred.getPredictedDelayed());
             saved = flightRepository.save(saved);
-
-            log.info("Flight {} created with risk level: {}",
-                    saved.getFlightId(), saved.getRiskLevel());
         } catch (Exception e) {
-            log.warn("ML prediction skipped for {}: {}",
-                    saved.getFlightId(), e.getMessage());
+            log.warn("ML prediction skipped: {}", e.getMessage());
         }
 
         return saved;
     }
 
-    // Update flight status
-    public Flight updateStatus(String flightId, Flight.FlightStatus status) {
+    public Flight updateStatus(String flightId,
+                               Flight.FlightStatus status) {
         Flight flight = getFlightById(flightId);
         flight.setStatus(status);
         flight.setUpdatedAt(LocalDateTime.now());
         return flightRepository.save(flight);
     }
 
-    // Run ML prediction on all existing flights
-    // Called on startup to score all flights
+    // ── Predict all flights with live weather ─────────────────────────────────
     public void predictAllFlights() {
         List<Flight> flights = flightRepository.findAll();
-        log.info("Running ML predictions on {} flights...", flights.size());
+        log.info("Running ML predictions on {} flights...",
+                flights.size());
+
+        // Fetch live weather for all airports first
+        Map<String, Integer> liveWeather =
+                weatherService.getWeatherForAllAirports();
+        log.info("Live weather scores: {}", liveWeather);
 
         for (Flight flight : flights) {
             try {
-                FlightPredictionResponse prediction =
-                        mlService.predict(mlService.buildRequest(flight));
-                flight.setDelayProbability(prediction.getDelayProbability());
-                flight.setRiskLevel(prediction.getRiskLevel());
-                flight.setPredictedDelayed(prediction.getPredictedDelayed());
+                // Update flight weather score with live data
+                if (flight.getOrigin() != null) {
+                    int score = liveWeather.getOrDefault(
+                        flight.getOrigin(),
+                        flight.getWeatherScore() != null
+                            ? flight.getWeatherScore() : 1);
+                    flight.setWeatherScore(score);
+                }
+
+                FlightPredictionResponse pred =
+                    mlService.predict(mlService.buildRequest(flight));
+                flight.setDelayProbability(pred.getDelayProbability());
+                flight.setRiskLevel(pred.getRiskLevel());
+                flight.setPredictedDelayed(pred.getPredictedDelayed());
                 flight.setUpdatedAt(LocalDateTime.now());
                 flightRepository.save(flight);
+
+                log.info("  {} → risk:{} prob:{}",
+                        flight.getFlightId(),
+                        flight.getRiskLevel(),
+                        flight.getDelayProbability());
             } catch (Exception e) {
-                log.warn("Prediction failed for {}", flight.getFlightId());
+                log.warn("Prediction failed for {}: {}",
+                        flight.getFlightId(), e.getMessage());
             }
         }
-        log.info("ML predictions complete.");
+        log.info("✅ ML predictions complete");
+    }
+
+    // ── Auto-refresh weather + predictions every 30 minutes ──────────────────
+    @Scheduled(fixedDelay = 30 * 60 * 1000, initialDelay = 60000)
+    public void autoRefreshWeatherAndPredictions() {
+        log.info("🔄 Auto-refreshing weather and ML predictions...");
+        try {
+            predictAllFlights();
+        } catch (Exception e) {
+            log.error("Auto-refresh failed: {}", e.getMessage());
+        }
     }
 }

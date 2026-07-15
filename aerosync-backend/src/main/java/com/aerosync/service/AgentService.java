@@ -148,53 +148,114 @@ public class AgentService {
 
     // Gemini is now ONLY called for explanation generation
 // Not for decision making — decisions are algorithmic
-    @SuppressWarnings("unchecked")
-    private String generateExplanation(
-            Map<String, Object> resolution,
-            Disruption disruption,
-            Flight flight) {
-        try {
-            Map<String, Object> gateRes =
-                    (Map<String, Object>) resolution.get("gate_resolution");
-            Map<String, Object> crewRes =
-                    (Map<String, Object>) resolution.get("crew_resolution");
-            Map<String, Object> paxRes  =
-                    (Map<String, Object>) resolution.get("passenger_resolution");
+    // ── EXPLANATION — purely algorithmic, zero API calls ─────────────────────
+@SuppressWarnings("unchecked")
+private String generateExplanation(
+        Map<String, Object> resolution,
+        Disruption disruption,
+        Flight flight) {
 
-            String prompt = String.format(
-                    "You are an aviation operations AI. "
-                            + "Explain this disruption resolution in plain English "
-                            + "for airline operations staff. Keep it under 60 words. "
-                            + "Be specific about what changed and why.\n\n"
-                            + "Flight: %s | Route: %s→%s | Type: %s | Delay: %dmin\n"
-                            + "Gate: %s | Crew: %s | Passengers: %s\n"
-                            + "Respond with one clear paragraph only.",
-                    flight.getFlightId(),
-                    flight.getOrigin(), flight.getDestination(),
-                    disruption.getType(),
-                    disruption.getDelayMinutes() != null
-                            ? disruption.getDelayMinutes() : 0,
-                    gateRes != null ? gateRes.get("action") + " " +
-                            gateRes.get("reason") : "unchanged",
-                    crewRes != null ? crewRes.get("action") + " " +
-                            crewRes.get("reason") : "unchanged",
-                    paxRes != null ? paxRes.get("action") + " " +
-                            paxRes.get("affected_count") + " pax" : "no action"
-            );
+    // Build a concise context string for Gemini
+    // Gemini only explains — all decisions already made by algorithm
+    try {
+        Map<String, Object> gateRes =
+            (Map<String, Object>) resolution.get("gate_resolution");
+        Map<String, Object> crewRes =
+            (Map<String, Object>) resolution.get("crew_resolution");
+        Map<String, Object> paxRes  =
+            (Map<String, Object>) resolution.get("passenger_resolution");
+        List<String> actions =
+            (List<String>) resolution.get("actions_taken");
 
-            return callGeminiApi(prompt);
-        } catch (Exception e) {
-            log.warn("Explanation generation failed: {}", e.getMessage());
-            // Fallback explanation built from algorithm results
-            List<Object> actions =
-                    (List<Object>) resolution.get("actions_taken");
-            return "Disruption on " + flight.getFlightId()
-                    + " resolved algorithmically. Actions: "
-                    + (actions != null ? String.join(", ",
-                    actions.stream().map(Object::toString).toList())
-                    : "see details above");
+        // Compact prompt — uses very few tokens
+        String prompt = String.format(
+            "Aviation ops brief for staff. Max 50 words. "
+            + "Plain English only. No jargon.\n"
+            + "Flight %s (%s→%s) has %s disruption, %d min delay.\n"
+            + "Algorithm decided: %s\n"
+            + "Explain what happened and what was done.",
+            flight.getFlightId(),
+            flight.getOrigin(),
+            flight.getDestination(),
+            disruption.getType().toString().replace("_", " "),
+            disruption.getDelayMinutes() != null
+                ? disruption.getDelayMinutes() : 0,
+            actions != null
+                ? String.join(", ", actions)
+                : "see resolution details"
+        );
+
+        String geminiExplanation = callGeminiApi(prompt);
+
+        // If Gemini returns valid text use it
+        // Otherwise fall back to algorithmic explanation
+        if (geminiExplanation != null
+                && !geminiExplanation.isBlank()
+                && !geminiExplanation.contains("KEEP")
+                && geminiExplanation.length() > 20) {
+            log.info("✅ Gemini explanation generated");
+            return geminiExplanation;
         }
+
+    } catch (Exception e) {
+        log.warn("Gemini explanation failed: {} — using algorithmic",
+                e.getMessage());
     }
+
+    // Algorithmic fallback — always works, zero API cost
+    return buildAlgorithmicExplanation(resolution, disruption, flight);
+}
+
+
+// Algorithmic explanation as fallback
+@SuppressWarnings("unchecked")
+private String buildAlgorithmicExplanation(
+        Map<String, Object> resolution,
+        Disruption disruption,
+        Flight flight) {
+
+    StringBuilder sb = new StringBuilder();
+    sb.append("Flight ").append(flight.getFlightId())
+      .append(" (").append(flight.getOrigin())
+      .append("→").append(flight.getDestination())
+      .append(") disrupted: ")
+      .append(disruption.getType().toString()
+              .replace("_", " ").toLowerCase())
+      .append(". ");
+
+    Map<String, Object> gateRes =
+        (Map<String, Object>) resolution.get("gate_resolution");
+    if (gateRes != null
+            && "REASSIGNED".equals(gateRes.get("action"))) {
+        sb.append("Gate → ").append(gateRes.get("new_gate")).append(". ");
+    }
+
+    Map<String, Object> crewRes =
+        (Map<String, Object>) resolution.get("crew_resolution");
+    if (crewRes != null
+            && "SWAPPED".equals(crewRes.get("action"))) {
+        sb.append("Crew ").append(crewRes.get("old_crew_id"))
+          .append(" → ").append(crewRes.get("new_crew_id"))
+          .append(" (").append(crewRes.get("hours_remaining"))
+          .append("h left). ");
+    }
+
+    Map<String, Object> paxRes =
+        (Map<String, Object>) resolution.get("passenger_resolution");
+    if (paxRes != null && !"NONE".equals(paxRes.get("action"))) {
+        sb.append(paxRes.get("affected_count"))
+          .append(" pax ").append(
+              paxRes.get("action").toString().toLowerCase())
+          .append("ed. ");
+    }
+
+    Object delay = resolution.get("estimated_new_delay_mins");
+    if (delay != null) {
+        sb.append("Est. delay: ").append(delay).append(" min.");
+    }
+
+    return sb.toString();
+}
 
 
     // ── ORCHESTRATOR AGENT ────────────────────────────────────────────────────
@@ -681,5 +742,171 @@ public class AgentService {
         error.put("total_cost_impact",        15000);
         error.put("confidence_score",         0.0);
         return error;
+    }
+
+    // ── PROPOSE — algorithm reasons, human approves ───────────────────────────
+    // Returns a proposal without applying anything to DB.
+    public Map<String, Object> proposeResolution(Long disruptionId) {
+        long startTime = System.currentTimeMillis();
+
+        Disruption disruption = disruptionRepository
+                .findById(disruptionId)
+                .orElseThrow(() -> new RuntimeException(
+                    "Disruption not found: " + disruptionId));
+
+        Flight flight = flightRepository
+                .findByFlightId(disruption.getFlightId())
+                .orElseThrow(() -> new RuntimeException(
+                    "Flight not found: " + disruption.getFlightId()));
+
+        log.info("📋 Proposing resolution for disruption {}",
+                disruptionId);
+
+        // Generate proposal — does NOT touch DB
+        Map<String, Object> proposal =
+            resolutionAlgorithmService.proposeOnly(disruption, flight);
+
+        // Gemini explains the proposal in plain English
+        String explanation = generateExplanation(
+            proposal, disruption, flight);
+        proposal.put("ai_explanation", explanation);
+
+        // Save proposal as PROPOSED status
+        try {
+            disruption.setStatus(Disruption.DisruptionStatus.PROPOSED);
+            disruption.setResolutionJson(
+                objectMapper.writeValueAsString(proposal));
+            disruptionRepository.save(disruption);
+        } catch (Exception e) {
+            log.error("Failed to save proposal: {}", e.getMessage());
+        }
+
+        long elapsed = System.currentTimeMillis() - startTime;
+        proposal.put("proposal_time_ms",      elapsed);
+        proposal.put("disruption_id",         disruptionId);
+        proposal.put("flight_id",             flight.getFlightId());
+        proposal.put("requires_approval",     true);
+        proposal.put("proposed_at",
+            LocalDateTime.now().toString());
+
+        log.info("📋 Proposal ready in {}ms — awaiting human approval",
+                elapsed);
+        return proposal;
+    }
+
+
+    // ── APPROVE — human approved, now apply to DB ─────────────────────────────
+    public Map<String, Object> applyApprovedResolution(
+            Long disruptionId,
+            Map<String, Object> approvedResolution) {
+
+        long startTime = System.currentTimeMillis();
+
+        Disruption disruption = disruptionRepository
+                .findById(disruptionId)
+                .orElseThrow(() -> new RuntimeException(
+                    "Disruption not found: " + disruptionId));
+
+        Flight flight = flightRepository
+                .findByFlightId(disruption.getFlightId())
+                .orElseThrow();
+
+        log.info("✅ Human approved disruption {} — applying...",
+                disruptionId);
+
+        // NOW apply to database
+        resolutionAlgorithmService
+            .applyResolution(approvedResolution, flight);
+
+        // Handle cascade for connected flights
+        Map<String, Object> cascade = cascadeService.resolveCascade(
+            flight.getFlightId(),
+            disruption.getDelayMinutes() != null
+                ? disruption.getDelayMinutes() : 60);
+
+        approvedResolution.put("cascade_result",    cascade);
+        approvedResolution.put("approved_by_human", true);
+        approvedResolution.put("status",            "RESOLVED");
+
+        long elapsed = System.currentTimeMillis() - startTime;
+        disruptionService.markResolved(
+            disruptionId,
+            safeToJson(approvedResolution),
+            elapsed);
+
+        approvedResolution.put("resolution_time_ms", elapsed);
+        approvedResolution.put("resolved_at",
+            LocalDateTime.now().toString());
+
+        log.info("✅ Approved resolution applied in {}ms", elapsed);
+        return approvedResolution;
+    }
+
+
+    // ── REJECT — human rejected, agent re-reasons with feedback ───────────────
+    public Map<String, Object> reReasonWithFeedback(
+            Long disruptionId, String rejectionReason) {
+
+        Disruption disruption = disruptionRepository
+                .findById(disruptionId)
+                .orElseThrow();
+        Flight flight = flightRepository
+                .findByFlightId(disruption.getFlightId())
+                .orElseThrow();
+
+        log.info("🔄 Re-reasoning disruption {} — reason: {}",
+                disruptionId, rejectionReason);
+
+        // Algorithm re-runs excluding rejected resource
+        Map<String, Object> revised =
+            resolutionAlgorithmService.resolveWithConstraint(
+                disruption, flight, rejectionReason);
+
+        // Gemini explains why revised proposal addresses rejection
+        try {
+            String prompt = String.format(
+                "Previous resolution rejected: %s\n"
+                + "Revised resolution for flight %s (%s disruption).\n"
+                + "New actions: %s\n"
+                + "In 40 words: explain why this revision "
+                + "addresses the rejection.",
+                rejectionReason,
+                flight.getFlightId(),
+                disruption.getType(),
+                revised.get("actions_proposed")
+            );
+            String explanation = callGeminiApi(prompt);
+            if (explanation != null && !explanation.isBlank()) {
+                revised.put("ai_explanation", explanation);
+            }
+        } catch (Exception e) {
+            revised.put("ai_explanation",
+                "Revised proposal excludes rejected resource "
+                + "and selects next best alternative.");
+        }
+
+        revised.put("rejection_reason",      rejectionReason);
+        revised.put("status",                "PROPOSED");
+        revised.put("requires_approval",     true);
+        revised.put("proposed_at",
+            LocalDateTime.now().toString());
+
+        // Save revised proposal
+        try {
+            disruption.setResolutionJson(
+                objectMapper.writeValueAsString(revised));
+            disruptionRepository.save(disruption);
+        } catch (Exception e) {
+            log.error("Save failed: {}", e.getMessage());
+        }
+
+        return revised;
+    }
+
+
+    // Helper
+    private String safeToJson(Map<String, Object> map) {
+        try { return objectMapper.writeValueAsString(map); }
+        catch (Exception e) { return "{}"; }
     }
 }
