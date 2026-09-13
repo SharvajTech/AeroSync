@@ -14,7 +14,7 @@ INDIAN_AIRPORTS = {
 # OpenSky credentials — register free at opensky-network.org
 # Without credentials, only live states work (not historical)
 OPENSKY_USERNAME = "sharvaj02"  # leave blank for anonymous
-OPENSKY_PASSWORD = "Sharvaj@#0205"
+OPENSKY_PASSWORD = ""
 
 
 def fetch_live_states(icao_code: str) -> list:
