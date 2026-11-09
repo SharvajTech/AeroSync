@@ -1,0 +1,70 @@
+DOCUMENT STATUS: SYNTHETIC / DEMONSTRATION ONLY
+This is a fictional standard operating procedure written for the AeroSync
+portfolio project. It is not sourced from, and must not be presented as,
+an actual airline or regulatory SOP.
+
+TITLE: AeroSync Disruption Response SOP (Demo)
+DOCUMENT ID: AS-SOP-001
+
+## Purpose
+
+Defines the standard sequence of steps AeroSync's resolution engine and
+duty officers follow when a disruption is first detected, from detection
+through to logged resolution.
+
+## Step 1 — Detection and Classification
+
+On detecting a delay, cancellation, or technical event, the system
+classifies its severity:
+
+- Minor: projected delay under 30 minutes, no downstream cascade risk
+  flagged.
+- Moderate: projected delay 30–120 minutes, or a cascade risk flagged
+  against fewer than 3 downstream flights.
+- Severe: projected delay over 120 minutes, cancellation, or a cascade
+  risk flagged against 3 or more downstream flights.
+
+## Step 2 — Cascade Assessment
+
+For Moderate and Severe events, the resolution engine runs a cascade
+assessment across the affected aircraft's remaining rotation and any
+crew or gate dependencies, per the cascade simulation logic, before any
+resolution options are generated.
+
+## Step 3 — Option Generation
+
+The resolution engine proposes resolution options drawn from the
+applicable policies: crew reassignment (see AS-CREW-001), gate
+reassignment (see AS-GATE-001), aircraft swap (see AS-SWAP-001), and
+passenger rebooking (see AS-REBOOK-001), ranked by estimated total
+passenger-minutes of delay avoided.
+
+## Step 4 — Human Review
+
+All Severe-classified events, and any Moderate event where the top-ranked
+option requires duty-manager sign-off under its own policy, are queued
+for human review before any action is taken. Minor events may be
+auto-resolved if the top-ranked option requires no sign-off under any
+applicable policy.
+
+## Step 5 — Execution and Logging
+
+Once approved (automatically or by a duty officer), the resolution engine
+executes the selected option and writes an audit record containing: the
+triggering event, severity classification, all options considered, the
+option selected, who approved it (system or named duty officer), and the
+outcome.
+
+## Step 6 — Post-Event Review
+
+Severe events are queued for post-event review within 24 hours, to check
+whether the cascade assessment's projected impact matched the actual
+outcome. Significant mismatches should be flagged for policy or model
+review rather than treated as one-off anomalies.
+
+## Escalation
+
+Any event where no resolution option can be generated that avoids
+breaching a hard limit in the referenced policies (duty time, minimum
+turnaround, swap eligibility) must be escalated to a duty manager
+immediately rather than left unresolved in the queue.

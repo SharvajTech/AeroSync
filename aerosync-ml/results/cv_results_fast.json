@@ -1,0 +1,61 @@
+{
+  "mode": "fast_cv_reduced_hyperparameters",
+  "n_folds": 5,
+  "random_state": 42,
+  "fold_metrics": [
+    {
+      "Accuracy": 0.9465,
+      "Precision": 0.9404255319148936,
+      "Recall": 0.9454545454545454,
+      "F1": 0.9429333333333333,
+      "ROC-AUC": 0.9922673294669981,
+      "Brier": 0.03581101058703784,
+      "Fit Time (s)": 3.793629748000967
+    },
+    {
+      "Accuracy": 0.956,
+      "Precision": 0.9568500539374326,
+      "Recall": 0.948663101604278,
+      "F1": 0.9527389903329753,
+      "ROC-AUC": 0.9926529587507218,
+      "Brier": 0.033569540216038356,
+      "Fit Time (s)": 2.1992342159974214
+    },
+    {
+      "Accuracy": 0.9535,
+      "Precision": 0.9586056644880174,
+      "Recall": 0.9411764705882353,
+      "F1": 0.9498111171073934,
+      "ROC-AUC": 0.9932464663202029,
+      "Brier": 0.0325655580828067,
+      "Fit Time (s)": 1.9552590269995562
+    },
+    {
+      "Accuracy": 0.951,
+      "Precision": 0.9534127843986999,
+      "Recall": 0.9411764705882353,
+      "F1": 0.9472551130247578,
+      "ROC-AUC": 0.991508121814667,
+      "Brier": 0.03709238984072899,
+      "Fit Time (s)": 1.9246960470009071
+    },
+    {
+      "Accuracy": 0.9465,
+      "Precision": 0.9519125683060109,
+      "Recall": 0.9325481798715204,
+      "F1": 0.9421308815575987,
+      "ROC-AUC": 0.9911012369883212,
+      "Brier": 0.039868105184345706,
+      "Fit Time (s)": 2.5953170399989176
+    }
+  ],
+  "summary": {
+    "ROC-AUC": {
+      "mean": 0.9921552226681822,
+      "std": 0.0007721071400071629,
+      "min": 0.9911012369883212,
+      "max": 0.9932464663202029
+    }
+  },
+  "note": "Fast version uses reduced hyperparameters for speed. Results are credible but slightly lower than full train_model.py due to underparameterization."
+}

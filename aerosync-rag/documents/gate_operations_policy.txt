@@ -1,0 +1,59 @@
+DOCUMENT STATUS: SYNTHETIC / DEMONSTRATION ONLY
+This is a fictional policy written for the AeroSync portfolio project. It
+is not sourced from, and must not be presented as, an actual airport
+authority regulation or official gate-management manual.
+
+TITLE: AeroSync Gate Operations Policy (Demo)
+DOCUMENT ID: AS-GATE-001
+
+## Purpose
+
+Defines how gates are assigned, reassigned, and prioritized when a
+disruption requires the resolution engine to reallocate limited gate
+capacity across affected flights.
+
+## Gate Assignment Priority
+
+When more than one flight is competing for a gate reassignment, priority
+is given in this order:
+
+1. Flights already delayed more than 45 minutes.
+2. Flights carrying passengers with tight connections (under 60 minutes to
+   next departure) to more than 20 passengers.
+3. Wide-body aircraft, which have fewer compatible gates available.
+4. All other flights, prioritized by scheduled departure time.
+
+## Minimum Turnaround by Aircraft Type
+
+Gate scoring should treat the following as minimum safe turnaround
+windows; a proposed reassignment that leaves less than this buffer should
+be flagged as high-risk rather than auto-approved:
+
+- Narrow-body (A320/B737 family): 35 minutes
+- A321 / stretched narrow-body: 40 minutes
+- Regional turboprop (ATR72 and similar): 25 minutes
+- Wide-body (B777 and similar): 60 minutes
+
+## Gate Reassignment Triggers
+
+A flight's gate should be reassigned when any of the following occur:
+
+- The incoming aircraft is delayed such that the current gate's minimum
+  turnaround window (above) can no longer be met.
+- A higher-priority flight (per the priority order above) requires the
+  same gate within the conflict window.
+- The assigned gate is not compatible with the aircraft type inbound
+  (e.g. a wide-body aircraft assigned a narrow-body-only gate).
+
+## Remote Stand Fallback
+
+If no contact gate can be found within the delay tolerance for a flight,
+the flight should be assigned to a remote stand with bus transfer rather
+than held indefinitely for a gate. This should be treated as a last
+resort, since it adds passenger transfer time.
+
+## Documentation
+
+Every gate reassignment must be logged with: flight ID, original gate,
+new gate, aircraft type, trigger reason, and the resulting turnaround
+buffer under the new assignment.

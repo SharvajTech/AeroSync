@@ -1,0 +1,60 @@
+DOCUMENT STATUS: SYNTHETIC / DEMONSTRATION ONLY
+This is a fictional policy written for the AeroSync portfolio project. It
+is not sourced from, and must not be presented as, an actual DGCA
+regulation, airline manual, or any other official document.
+
+TITLE: AeroSync Crew Operations Policy (Demo)
+DOCUMENT ID: AS-CREW-001
+
+## Purpose
+
+This policy defines how AeroSync's resolution engine and duty officers
+should treat crew duty time, rest requirements, and reassignment decisions
+when resolving a flight disruption.
+
+## Duty Time Limits
+
+A cockpit or cabin crew member's duty period begins at report time and
+ends 30 minutes after the final flight of the day blocks in. Standard duty
+limits used by AeroSync's scheduling logic are:
+
+- Maximum single duty period: 13 hours for a two-pilot crew on narrow-body
+  aircraft, reduced to 11 hours for duty periods with more than 4 sectors.
+- Minimum rest between duty periods: 12 hours, or the length of the
+  preceding duty period, whichever is greater.
+- A crew member already at or beyond 10 duty hours is flagged internally
+  as "high fatigue risk" and should not be assigned an additional sector
+  without supervisor override.
+
+## Crew Reassignment Rules
+
+Crew may be reassigned to cover a disrupted flight only if all of the
+following hold:
+
+1. The reassignment does not push the crew member's projected duty period
+   past the applicable limit in the section above, including the
+   estimated duty time of the new sector.
+2. The crew member holds a valid type rating for the aircraft in question.
+3. At least 45 minutes of turnaround buffer remains between the crew
+   member's prior sector and the new report time.
+4. If the crew member's remaining duty margin before reassignment is under
+   90 minutes, reassignment requires duty-manager sign-off rather than
+   automatic approval.
+
+Crew that are already within 60 minutes of their duty limit should not be
+reassigned under any circumstances; a fresh crew or standby crew must be
+sourced instead, even if this introduces additional delay.
+
+## Standby Crew Activation
+
+Each base maintains a standby crew pool. Standby crew should be activated
+in preference to reassigning an already-flying crew member whenever the
+projected delay to activate standby is less than the delay that would
+result from waiting for the original crew to become legal again.
+
+## Documentation
+
+Every reassignment decision, whether automatic or manager-approved, must
+be logged with: crew ID, original assignment, new assignment, duty hours
+at time of decision, and the rule under this policy that justified the
+decision.

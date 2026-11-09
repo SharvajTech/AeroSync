@@ -1,0 +1,13 @@
+# aerosync-dashboard dependencies
+# Install with: pip install -r requirements.txt
+
+streamlit
+plotly
+requests
+pandas
+numpy
+
+# The dashboard imports aerosync-ml/main.py and aerosync-rag/ directly for
+# the in-process fallback path, so it also needs their dependencies —
+# see ../aerosync-ml/requirements.txt and ../aerosync-rag/requirements.txt.
+# Simplest: install those two first, then this one.

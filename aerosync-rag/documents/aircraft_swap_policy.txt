@@ -1,0 +1,63 @@
+DOCUMENT STATUS: SYNTHETIC / DEMONSTRATION ONLY
+This is a fictional policy written for the AeroSync portfolio project. It
+is not sourced from, and must not be presented as, an actual airline
+operations control manual.
+
+TITLE: AeroSync Aircraft Swap Policy (Demo)
+DOCUMENT ID: AS-SWAP-001
+
+## Purpose
+
+Defines when the resolution engine may propose swapping the aircraft
+assigned to a flight, and what conditions a proposed swap must satisfy
+before it can be presented for approval.
+
+## When a Swap Should Be Considered
+
+An aircraft swap should be proposed when:
+
+- The originally assigned aircraft has a projected delay exceeding 90
+  minutes due to an unresolved technical or rotation issue.
+- A technical fault has been logged against the assigned aircraft that
+  is not expected to clear before the flight's revised departure window.
+- Swapping unlocks a materially shorter cascade — i.e. the freed-up
+  aircraft can recover a later flight's schedule by more time than the
+  swap itself costs.
+
+## Swap Eligibility Conditions
+
+A candidate aircraft may only be swapped onto a flight if ALL of the
+following hold:
+
+1. Same or greater seating capacity as originally scheduled, unless the
+   load factor for the affected flight is below 70%, in which case a
+   smaller aircraft may be used with duty-manager approval.
+2. Valid maintenance status with no open deferred items that restrict the
+   route or sector length in question.
+3. The candidate aircraft's own schedule allows it to be released without
+   creating a new disruption of equal or greater severity elsewhere in the
+   network.
+4. Crew already assigned hold a valid type rating for the candidate
+   aircraft, or replacement crew with the correct rating are available
+   within the delay tolerance.
+
+## Swap Cost Evaluation
+
+Every proposed swap must include an estimated "cascade cost" — the total
+passenger-minutes of delay it is expected to introduce elsewhere in the
+network, weighed against the passenger-minutes of delay it prevents on
+the original flight. A swap should not be proposed if its cascade cost
+exceeds the delay it avoids.
+
+## Approval
+
+Swaps that keep the aircraft within the same fleet type and route family
+may be proposed for standard approval. Cross-fleet swaps (e.g. narrow-body
+for wide-body) always require duty-manager sign-off regardless of
+projected benefit, due to the downstream crew and gate implications.
+
+## Documentation
+
+Every swap proposal must record: original aircraft, candidate aircraft,
+trigger reason, estimated cascade cost avoided, estimated cascade cost
+introduced, and approval status.

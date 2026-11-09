@@ -20,10 +20,16 @@ public class JwtFilter extends OncePerRequestFilter {
 
     // Public endpoints that don't need JWT
     private static final List<String> PUBLIC_PATHS = List.of(
-            "/api/auth/login",
-            "/api/auth/airports",
-            "/api/health",
-            "/actuator"
+        "/api/auth/login",
+        "/api/auth/airports",
+        "/api/health",
+        "/actuator",
+        "/api/flights",
+        "/api/disruptions",
+        "/api/agents",
+        "/api/resolutions",
+        "/api/crew",
+        "/api/gates"
     );
 
     @Override

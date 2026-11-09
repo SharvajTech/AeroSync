@@ -22,3 +22,41 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# Python environments
+.venv/
+venv/
+env/
+torch_env/
+
+# Python cache and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets and environment configuration
+.env
+.env.*
+!.env.example
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+
+# Node dependencies and builds
+node_modules/
+.next/
+dist/
+build/
+
+# Java / Maven build output
+**/target/
+*.log
+
+# Temporary files
+*.patch

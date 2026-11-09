@@ -63,6 +63,68 @@ except Exception:
         print(f"❌ Model loading failed: {e}")
         raise RuntimeError(f"No model found: {e}")
 
+# ── SHAP explainability (optional — /predict works with or without it) ───────
+# Uses a SEPARATE artifact: the fitted XGBoost base-learner extracted from
+# inside the stacking ensemble during training (see
+# train_model.py::export_shap_artifacts). This does not touch or replace
+# `ensemble_model` — the calibrated stacking ensemble is still the only
+# model used to compute delay_probability. SHAP is used only to *explain*
+# that prediction, via the strongest individual tree-based component.
+#
+# Why this is a reasonable proxy rather than exactly what the ensemble did:
+# the deployed predictor is a 5-fold-calibrated StackingClassifier (4 base
+# learners + a Logistic Regression meta-learner) — there's no single tree
+# structure to run exact SHAP on, and a model-agnostic explainer over the
+# whole pipeline would be slow and only approximate. TreeExplainer on the
+# XGBoost base-learner is exact for that component and fast enough for a
+# live request; see README "Model explainability (SHAP)" for the full
+# rationale and its limits.
+SHAP_AVAILABLE = False
+try:
+    import shap
+    xgb_shap_model = joblib.load(f"{MODEL_DIR}/xgb_base_estimator.pkl")
+    shap_feature_cols = joblib.load(f"{MODEL_DIR}/shap_feature_columns.pkl")
+    if shap_feature_cols != feature_cols:
+        print("⚠️ SHAP feature columns don't match the deployed model's "
+              "feature columns — disabling SHAP to avoid misaligned "
+              "explanations. Retrain with train_model.py to refresh both.")
+    else:
+        shap_explainer = shap.TreeExplainer(xgb_shap_model)
+        SHAP_AVAILABLE = True
+        print("✅ SHAP explainer loaded (XGBoost base-learner)")
+except Exception as e:
+    print(f"⚠️ SHAP explainability not available: {e}")
+
+# ── RAG retrieval (optional — /rag/retrieve works with or without it) ────────
+# Bridges to aerosync-rag/, a SIBLING directory of aerosync-ml/. Loads a
+# pre-built FAISS index (built ahead of time via
+# aerosync-rag/retrieval/build_index.py) — this service only ever LOADS an
+# index, it never builds one at request time. Falls back gracefully — same
+# pattern as WEATHER_AVAILABLE/SHAP_AVAILABLE above — so a missing index or
+# missing aerosync-rag/ never breaks /predict or anything else in this file.
+RAG_AVAILABLE = False
+try:
+    import sys as _sys
+    _rag_retrieval_dir = os.path.join(os.path.dirname(__file__), "..", "aerosync-rag", "retrieval")
+    _rag_ingestion_dir = os.path.join(os.path.dirname(__file__), "..", "aerosync-rag", "ingestion")
+    _rag_index_dir = os.path.join(os.path.dirname(__file__), "..", "aerosync-rag", "index")
+    _sys.path.insert(0, _rag_retrieval_dir)
+    _sys.path.insert(0, _rag_ingestion_dir)
+
+    from faiss_retriever import FaissRetriever  # noqa: E402
+
+    if os.path.exists(os.path.join(_rag_index_dir, "flight_policies.faiss")):
+        rag_retriever = FaissRetriever.load(_rag_index_dir)
+        RAG_BACKEND_NAME = rag_retriever.embedder.name
+        RAG_AVAILABLE = True
+        print(f"✅ RAG retriever loaded (backend: {RAG_BACKEND_NAME})")
+    else:
+        print("⚠️ No RAG index found at aerosync-rag/index/ — run "
+              "aerosync-rag/retrieval/build_index.py first. /rag/retrieve "
+              "will report unavailable until then.")
+except Exception as e:
+    print(f"⚠️ RAG retrieval not available: {e}")
+
 # ── Weather service ───────────────────────────────────────────────────────────
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
 try:
@@ -128,6 +190,11 @@ class CascadeRequest(BaseModel):
     disrupted_flight_id: str
     delay_minutes:       int
     flights:             List[GraphFlightNode]
+
+
+class RagRetrieveRequest(BaseModel):
+    query: str
+    top_k: Optional[int] = 3
 
 
 # ── Feature engineering ───────────────────────────────────────────────────────
@@ -200,6 +267,46 @@ def get_top_factors(fv, feature_names, imps) -> list:
                   reverse=True)[:5]
 
 
+def get_shap_explanation(fv_scaled_row, fv_unscaled, feature_names) -> list:
+    """Local, per-prediction SHAP explanation for a single flight.
+
+    Global feature importance (top_delay_factors / models/info) answers
+    "what does this model generally care about, across every flight?" — it
+    is a single fixed ranking that never changes per request. It cannot
+    tell you WHY *this specific* flight was scored the way it was: two
+    flights can hit the same top_delay_factors while one is actually driven
+    mostly by weather and the other mostly by crew duty hours, and a static
+    importance ranking can't distinguish them.
+
+    SHAP fixes that by attributing THIS prediction's score to THIS flight's
+    exact feature values: for the fitted XGBoost base-learner, it computes
+    exactly how many log-odds each feature value added or subtracted for
+    this one input, relative to the model's average output. That's the
+    "local explanation" requested — the direction and magnitude are read
+    directly off shap.TreeExplainer's output, never invented or estimated.
+    """
+    if not SHAP_AVAILABLE:
+        return []
+    try:
+        shap_values = shap_explainer.shap_values(fv_scaled_row)
+        row = np.asarray(shap_values)[0]  # (n_features,) for this one row
+
+        entries = []
+        for i, fname in enumerate(feature_names):
+            contribution = float(row[i])
+            entries.append({
+                "feature":     fname,
+                "value":       round(float(fv_unscaled[i]), 3),
+                "impact":      "increases_risk" if contribution > 0 else "decreases_risk",
+                "contribution": round(contribution, 4),
+            })
+        return sorted(entries, key=lambda e: abs(e["contribution"]),
+                      reverse=True)[:5]
+    except Exception as e:
+        print(f"⚠️ SHAP explanation failed for this request: {e}")
+        return []
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -209,7 +316,8 @@ def root():
         "status":       "running",
         "model":        MODEL_NAME,
         "features":     len(feature_cols),
-        "weather_live": WEATHER_AVAILABLE
+        "weather_live": WEATHER_AVAILABLE,
+        "shap_explainability": SHAP_AVAILABLE
     }
 
 
@@ -219,7 +327,8 @@ def health():
         "status":        "healthy",
         "models_loaded": True,
         "model_type":    MODEL_NAME,
-        "weather_live":  WEATHER_AVAILABLE
+        "weather_live":  WEATHER_AVAILABLE,
+        "shap_explainability": SHAP_AVAILABLE
     }
 
 
@@ -234,7 +343,8 @@ def models_info():
         "model_type":    MODEL_NAME,
         "feature_count": len(feature_cols),
         "top_features":  [{"feature": f, "importance": round(v, 4)}
-                          for f, v in top_features]
+                          for f, v in top_features],
+        "shap_explainability": SHAP_AVAILABLE
     }
 
 
@@ -275,6 +385,16 @@ def predict(req: FlightPredictionRequest):
         top_factors = get_top_factors(
             fv[0].tolist(), feature_cols, importances)
 
+        # Local, per-flight SHAP explanation — see get_shap_explanation()
+        # docstring for how this differs from top_delay_factors above.
+        # "value" is the original (unscaled) feature value for readability;
+        # "contribution" is the SHAP attribution computed on the
+        # standardized input the XGBoost base-learner actually sees.
+        explanation = (
+            get_shap_explanation(fv_input, fv[0], feature_cols)
+            if SHAP_AVAILABLE else []
+        )
+
         return {
             "flight_id":           req.flight_id,
             "delay_probability":   round(delay_prob, 4),
@@ -282,6 +402,7 @@ def predict(req: FlightPredictionRequest):
             "predicted_delayed":   bool(delay_prob >= 0.50),
             "confidence":          round(abs(delay_prob - 0.5) * 2, 4),
             "top_delay_factors":   top_factors,
+            "explanation":         explanation,
             "model_used":          MODEL_NAME,
             "features_used":       len(feature_cols),
             "live_weather_score":  live_weather_score,
@@ -304,6 +425,7 @@ def predict_batch(flights: List[FlightPredictionRequest]):
                 "error":            str(e),
                 "delay_probability": 0.5,
                 "risk_level":        "MEDIUM",
+                "explanation":       [],
                 "model_used":        "fallback"
             })
     return {"total": len(flights), "results": results}
@@ -432,6 +554,38 @@ def simulate_cascade(req: CascadeRequest):
             "LOW"
         )
     }
+
+
+@app.post("/rag/retrieve")
+def rag_retrieve(req: RagRetrieveRequest):
+    """Retrieval only — no LLM call here. The Spring Boot backend's
+    RagService calls this to fetch policy/SOP evidence before asking
+    Gemini to explain a resolution (see aerosync-backend AgentService).
+    Never raises: on any failure this returns available=false with an
+    empty chunk list rather than an HTTP error, so callers can degrade
+    gracefully (see requirement: 'if LLM/RAG fails, still return the
+    deterministic resolution')."""
+    if not RAG_AVAILABLE:
+        return {"available": False, "backend": None, "chunks": [], "count": 0}
+    try:
+        top_k = req.top_k or 3
+        results = rag_retriever.retrieve(req.query, top_k=top_k)
+        chunks = [
+            {
+                "doc_name": r.doc_name,
+                "doc_title": r.doc_title,
+                "section": r.section,
+                "chunk_id": r.chunk_id,
+                "text": r.text,
+                "score": round(float(r.score), 4),
+            }
+            for r in results
+        ]
+        return {"available": True, "backend": RAG_BACKEND_NAME,
+                "chunks": chunks, "count": len(chunks)}
+    except Exception as e:
+        return {"available": False, "backend": RAG_BACKEND_NAME,
+                "chunks": [], "count": 0, "error": str(e)}
 
 
 if __name__ == "__main__":

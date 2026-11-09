@@ -1,0 +1,139 @@
+{
+  "generated_at": "2026-09-28T01:14:56",
+  "backend": "numpy (PyTorch unavailable in this environment \u2014 see README)",
+  "graph": {
+    "n_nodes": 1891,
+    "n_edges_directed_pairs": 7262,
+    "cascade_risk_positive_rate": 0.27498677372932434
+  },
+  "split": {
+    "train": 1323,
+    "val": 283,
+    "test": 285,
+    "random_state": 42
+  },
+  "hyperparameters": {
+    "hidden_dim": 32,
+    "epochs": 300,
+    "lr": 0.02,
+    "weight_decay": 0.0005,
+    "architecture": "Input -> SAGE(hidden) -> SAGE(hidden) -> Linear(1) -> sigmoid"
+  },
+  "gnn_test_metrics": {
+    "Accuracy": 0.9789473684210527,
+    "Precision": 0.9736842105263158,
+    "Recall": 0.9487179487179487,
+    "F1": 0.961038961038961,
+    "ROC-AUC": 0.9990090424873034,
+    "Brier": 0.014045246876776218,
+    "confusion_matrix": [
+      [
+        205,
+        2
+      ],
+      [
+        4,
+        74
+      ]
+    ],
+    "fit_time_s": 1.9605156469988287,
+    "n_parameters": 2721
+  },
+  "baseline_test_metrics": {
+    "Accuracy": 0.968421052631579,
+    "Precision": 0.9367088607594937,
+    "Recall": 0.9487179487179487,
+    "F1": 0.9426751592356688,
+    "ROC-AUC": 0.9885420537594451,
+    "Brier": 0.028871456161141396,
+    "confusion_matrix": [
+      [
+        202,
+        5
+      ],
+      [
+        4,
+        74
+      ]
+    ]
+  },
+  "training_history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.9217132329940796,
+      "val_auc": 0.4731081926203877
+    },
+    {
+      "epoch": 25,
+      "train_loss": 0.0473715178668499,
+      "val_auc": 0.9927454659161976
+    },
+    {
+      "epoch": 50,
+      "train_loss": 0.00739531684666872,
+      "val_auc": 0.9949343339587241
+    },
+    {
+      "epoch": 75,
+      "train_loss": 0.0027250261045992374,
+      "val_auc": 0.9949343339587242
+    },
+    {
+      "epoch": 100,
+      "train_loss": 0.0022234281059354544,
+      "val_auc": 0.9963101938711696
+    },
+    {
+      "epoch": 125,
+      "train_loss": 0.0021352560725063086,
+      "val_auc": 0.9965603502188868
+    },
+    {
+      "epoch": 150,
+      "train_loss": 0.0019531294237822294,
+      "val_auc": 0.9969981238273922
+    },
+    {
+      "epoch": 175,
+      "train_loss": 0.0018036849796772003,
+      "val_auc": 0.9974358974358974
+    },
+    {
+      "epoch": 200,
+      "train_loss": 0.0016746579203754663,
+      "val_auc": 0.9976235146966854
+    },
+    {
+      "epoch": 225,
+      "train_loss": 0.001590748899616301,
+      "val_auc": 0.997936210131332
+    },
+    {
+      "epoch": 250,
+      "train_loss": 0.001513760071247816,
+      "val_auc": 0.9981863664790495
+    },
+    {
+      "epoch": 275,
+      "train_loss": 0.0014363087248057127,
+      "val_auc": 0.9983114446529081
+    },
+    {
+      "epoch": 300,
+      "train_loss": 0.0013685082085430622,
+      "val_auc": 0.9983739837398374
+    }
+  ],
+  "feature_names": [
+    "delay_probability",
+    "weather_score",
+    "crew_duty_hours",
+    "gate_turnaround_mins",
+    "aircraft_age",
+    "departure_hour",
+    "historical_delay_rate",
+    "incoming_delay_signal",
+    "num_connections"
+  ],
+  "note": "GNN vs. baseline share identical features and the identical train/test node split; the baseline discards the graph edges, so any GNN advantage reflects learned multi-hop message passing, not merely having graph-derived features."
+}

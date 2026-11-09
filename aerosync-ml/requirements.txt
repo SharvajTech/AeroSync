@@ -1,0 +1,28 @@
+# aerosync-ml dependencies — training pipeline + FastAPI serving
+# Install with: pip install -r requirements.txt
+
+# Data / ML
+pandas
+numpy
+scikit-learn
+xgboost
+joblib
+
+# Explainability (new)
+shap
+
+# Plots
+matplotlib
+seaborn
+
+# Serving
+fastapi
+uvicorn[standard]
+pydantic
+
+# Graph (cascade simulation)
+networkx
+
+# Config / HTTP
+python-dotenv
+requests

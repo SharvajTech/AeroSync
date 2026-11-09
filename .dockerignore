@@ -1,0 +1,8 @@
+aerosync-ml/torch_env/
+**/__pycache__/
+**/*.pyc
+aerosync-ml/gnn/plots/
+aerosync-ml/plots/
+aerosync-ml/results/
+aerosync-ml/data/
+aerosync-ml/gnn/data/

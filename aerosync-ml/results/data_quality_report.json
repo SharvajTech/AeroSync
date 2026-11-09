@@ -1,0 +1,224 @@
+{
+  "basic_stats": {
+    "n_records": 10000,
+    "n_columns": 26,
+    "n_duplicate_rows": 0,
+    "missing_values": {},
+    "class_distribution": {
+      "on_time": 5326,
+      "delayed": 4674,
+      "delayed_pct": 46.74
+    }
+  },
+  "correlation_scan": [
+    {
+      "feature": "risk_score",
+      "corr_with_delay_label": 0.6886,
+      "corr_with_delay_probability": 0.8445,
+      "used_as_model_input": false,
+      "is_label_derived_column": false,
+      "flag_high_correlation": true
+    },
+    {
+      "feature": "delay_probability",
+      "corr_with_delay_label": 0.8145,
+      "corr_with_delay_probability": NaN,
+      "used_as_model_input": false,
+      "is_label_derived_column": true,
+      "flag_high_correlation": true
+    },
+    {
+      "feature": "weather_score",
+      "corr_with_delay_label": 0.6321,
+      "corr_with_delay_probability": 0.7732,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "weather_monsoon",
+      "corr_with_delay_label": 0.3483,
+      "corr_with_delay_probability": 0.4727,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "crew_risk",
+      "corr_with_delay_label": 0.2857,
+      "corr_with_delay_probability": 0.3544,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "crew_duty_hours",
+      "corr_with_delay_label": 0.2728,
+      "corr_with_delay_probability": 0.3458,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "is_peak_hour",
+      "corr_with_delay_label": 0.2386,
+      "corr_with_delay_probability": 0.2959,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "is_monsoon",
+      "corr_with_delay_label": 0.1442,
+      "corr_with_delay_probability": 0.1926,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "tight_turnaround",
+      "corr_with_delay_label": 0.1577,
+      "corr_with_delay_probability": 0.1903,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "gate_turnaround_mins",
+      "corr_with_delay_label": -0.1453,
+      "corr_with_delay_probability": -0.1876,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "aircraft_age",
+      "corr_with_delay_label": 0.1267,
+      "corr_with_delay_probability": 0.1614,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "historical_delay_rate",
+      "corr_with_delay_label": 0.1078,
+      "corr_with_delay_probability": 0.1369,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "route_distance_km",
+      "corr_with_delay_label": 0.0835,
+      "corr_with_delay_probability": 0.1012,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "aging_aircraft",
+      "corr_with_delay_label": 0.0773,
+      "corr_with_delay_probability": 0.0941,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "is_fog_season",
+      "corr_with_delay_label": -0.0623,
+      "corr_with_delay_probability": -0.0902,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "day_of_week",
+      "corr_with_delay_label": 0.0488,
+      "corr_with_delay_probability": 0.0812,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "departure_hour",
+      "corr_with_delay_label": 0.0558,
+      "corr_with_delay_probability": 0.062,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "is_peak_day",
+      "corr_with_delay_label": 0.0187,
+      "corr_with_delay_probability": 0.0429,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "month",
+      "corr_with_delay_label": 0.0445,
+      "corr_with_delay_probability": 0.0404,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "destination_encoded",
+      "corr_with_delay_label": -0.0226,
+      "corr_with_delay_probability": -0.0189,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "origin_encoded",
+      "corr_with_delay_label": 0.0063,
+      "corr_with_delay_probability": 0.0008,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    },
+    {
+      "feature": "aircraft_encoded",
+      "corr_with_delay_label": 0.0008,
+      "corr_with_delay_probability": -0.0004,
+      "used_as_model_input": true,
+      "is_label_derived_column": false,
+      "flag_high_correlation": false
+    }
+  ],
+  "risk_score_redundancy_check": {
+    "present": true,
+    "used_as_model_input": false,
+    "formula": "0.25*weather_score + 0.35*historical_delay_rate + 0.15*crew_risk + 0.1*tight_turnaround + 0.08*is_fog_season + 0.07*is_peak_day",
+    "is_exact_deterministic_function_of_existing_features": true,
+    "max_reconstruction_error": 2.220446049250313e-16,
+    "corr_with_delay_label": 0.6886,
+    "corr_with_delay_probability": 0.8445,
+    "verdict": "risk_score is provably redundant with features already in FEATURE_COLUMNS (exact linear combination) and correlates with the label more strongly than any raw driver. Excluded from training \u2014 see train_model.py FEATURE_COLUMNS comment."
+  },
+  "feature_columns_used_for_training": [
+    "departure_hour",
+    "day_of_week",
+    "month",
+    "route_distance_km",
+    "weather_score",
+    "crew_duty_hours",
+    "historical_delay_rate",
+    "aircraft_age",
+    "gate_turnaround_mins",
+    "origin_encoded",
+    "destination_encoded",
+    "aircraft_encoded",
+    "is_peak_hour",
+    "is_monsoon",
+    "is_fog_season",
+    "is_peak_day",
+    "crew_risk",
+    "tight_turnaround",
+    "aging_aircraft",
+    "weather_monsoon"
+  ],
+  "n_features_used_for_training": 20
+}

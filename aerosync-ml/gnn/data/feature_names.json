@@ -1,0 +1,11 @@
+[
+  "delay_probability",
+  "weather_score",
+  "crew_duty_hours",
+  "gate_turnaround_mins",
+  "aircraft_age",
+  "departure_hour",
+  "historical_delay_rate",
+  "incoming_delay_signal",
+  "num_connections"
+]

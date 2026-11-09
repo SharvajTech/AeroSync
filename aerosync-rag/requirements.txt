@@ -1,0 +1,11 @@
+# aerosync-rag dependencies
+# Install with: pip install -r requirements.txt
+
+# Sparse retrieval (Part 6) — no extra install needed beyond this
+scikit-learn
+
+# Dense retrieval (Part 7)
+faiss-cpu
+sentence-transformers   # pulls in torch; if this can't install/download in
+                         # your environment, retrieval/embeddings.py falls
+                         # back to an offline TF-IDF+SVD embedder automatically

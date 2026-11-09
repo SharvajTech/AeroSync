@@ -1,0 +1,87 @@
+{
+  "timestamp": "2026-09-28T01:15:33.967040",
+  "description": "Latency benchmark for ResolutionAlgorithmService across batch sizes",
+  "environment": "Python simulation (models Java implementation)",
+  "batches": [
+    {
+      "batch_size": 1,
+      "num_runs": 5,
+      "latencies_ms": [
+        10.695651999412803,
+        10.887552001804579,
+        9.399722002854105,
+        9.396828001627,
+        9.411897000973113
+      ],
+      "statistics": {
+        "mean_ms": 9.95833020133432,
+        "p50_ms": 9.411897000973113,
+        "p95_ms": 10.849172001326224,
+        "p99_ms": 10.879876001708908,
+        "mean_per_resolution_ms": 9.95833020133432,
+        "throughput_resolutions_per_sec": 100.41844162448135
+      }
+    },
+    {
+      "batch_size": 10,
+      "num_runs": 5,
+      "latencies_ms": [
+        96.08332199422875,
+        96.39548400809872,
+        96.8462310047471,
+        96.82116000112728,
+        96.16430099049467
+      ],
+      "statistics": {
+        "mean_ms": 96.4620995997393,
+        "p50_ms": 96.39548400809872,
+        "p95_ms": 96.84121680402313,
+        "p99_ms": 96.8452281646023,
+        "mean_per_resolution_ms": 9.64620995997393,
+        "throughput_resolutions_per_sec": 103.66765850519623
+      }
+    },
+    {
+      "batch_size": 50,
+      "num_runs": 5,
+      "latencies_ms": [
+        485.0542750027671,
+        486.923819014919,
+        486.52077100632596,
+        486.5520370003651,
+        485.4679369891528
+      ],
+      "statistics": {
+        "mean_ms": 486.103767802706,
+        "p50_ms": 486.52077100632596,
+        "p95_ms": 486.8494626120082,
+        "p99_ms": 486.90894773433683,
+        "mean_per_resolution_ms": 9.72207535605412,
+        "throughput_resolutions_per_sec": 102.85869666472819
+      }
+    },
+    {
+      "batch_size": 100,
+      "num_runs": 5,
+      "latencies_ms": [
+        972.1054389992787,
+        972.8510860149981,
+        972.4736960233713,
+        972.2684629887226,
+        970.8523340123065
+      ],
+      "statistics": {
+        "mean_ms": 972.1102036077355,
+        "p50_ms": 972.2684629887226,
+        "p95_ms": 972.7756080166728,
+        "p99_ms": 972.8359904153331,
+        "mean_per_resolution_ms": 9.721102036077355,
+        "throughput_resolutions_per_sec": 102.8689953349691
+      }
+    }
+  ],
+  "summary": {
+    "median_latency_single_ms": 9.95833020133432,
+    "median_throughput": 102.86384599984865
+  }
+}

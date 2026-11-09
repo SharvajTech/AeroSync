@@ -3,7 +3,17 @@ import numpy as np
 import os
 
 # ── Reproducibility ──────────────────────────────────────────────────────────
-np.random.seed(42)
+# SYNTHETIC DATA GENERATOR — this produces simulated flight records, not
+# real airline operations data. See the "Data quality & leakage audit"
+# section of the README for the full audit writeup.
+#
+# RANDOM_STATE must match train_model.py's RANDOM_STATE (also 42) so that
+# "regenerate data → retrain" is fully reproducible end-to-end. Every
+# np.random.* call in this module draws from the single global seed set
+# below, so re-running this script from a clean process always produces a
+# byte-identical CSV.
+RANDOM_STATE = 42
+np.random.seed(RANDOM_STATE)
 NUM_RECORDS = 10000
 
 # ── Indian airport routes (realistic) ────────────────────────────────────────
@@ -155,6 +165,9 @@ def encode_categoricals(df):
 def save_data(df):
     os.makedirs("data", exist_ok=True)
     df.to_csv("data/flight_data.csv", index=False)
+    print(f"⚠️  SYNTHETIC DATASET — simulated for portfolio/demo purposes.")
+    print(f"    Not derived from real airline operations; do not present")
+    print(f"    model outputs trained on it as real-world delay statistics.")
     print(f"Dataset saved → data/flight_data.csv")
     print(f"Total records  : {len(df)}")
     print(f"Delayed flights: {df['delay_label'].sum()} "
@@ -165,7 +178,22 @@ def save_data(df):
     print(f"\nSample record:\n{df.iloc[0].to_dict()}")
 
 def engineer_features(df):
-    """Add derived features — must match train_model.py FEATURE_COLUMNS."""
+    """Add derived features.
+
+    NOTE — leakage audit: every column added here except `risk_score` is
+    used as a model input (must match train_model.py FEATURE_COLUMNS).
+    `risk_score` is intentionally kept OUT of FEATURE_COLUMNS: it is a
+    hand-weighted composite of six columns that are already present
+    individually (weather_score, historical_delay_rate, crew_risk,
+    tight_turnaround, is_fog_season, is_peak_day), built with weights close
+    to those in compute_delay_probability() above. A data-quality audit
+    (see data_quality_report.py / README) proved it is an exact
+    deterministic function of those six columns and correlates with the
+    label more strongly than any single raw driver — i.e. it adds no new
+    information while acting as a disguised shortcut to the label formula.
+    It is kept here only for analytics/dashboard display, not as a model
+    input.
+    """
     df["is_peak_hour"]    = df["departure_hour"].apply(
         lambda h: 1 if h in [7, 8, 9, 17, 18, 19, 20] else 0)
     df["is_monsoon"]      = df["month"].apply(

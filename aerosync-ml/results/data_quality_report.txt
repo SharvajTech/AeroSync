@@ -1,0 +1,41 @@
+Records: 10000
+Duplicate rows: 0
+Missing values: none
+Class distribution: {'on_time': 5326, 'delayed': 4674, 'delayed_pct': 46.74}
+
+Correlation scan (sorted by |corr with delay_probability|):
+              feature  corr_with_delay_label  corr_with_delay_probability  used_as_model_input  is_label_derived_column  flag_high_correlation
+           risk_score                 0.6886                       0.8445                False                    False                   True
+    delay_probability                 0.8145                          NaN                False                     True                   True
+        weather_score                 0.6321                       0.7732                 True                    False                  False
+      weather_monsoon                 0.3483                       0.4727                 True                    False                  False
+            crew_risk                 0.2857                       0.3544                 True                    False                  False
+      crew_duty_hours                 0.2728                       0.3458                 True                    False                  False
+         is_peak_hour                 0.2386                       0.2959                 True                    False                  False
+           is_monsoon                 0.1442                       0.1926                 True                    False                  False
+     tight_turnaround                 0.1577                       0.1903                 True                    False                  False
+ gate_turnaround_mins                -0.1453                      -0.1876                 True                    False                  False
+         aircraft_age                 0.1267                       0.1614                 True                    False                  False
+historical_delay_rate                 0.1078                       0.1369                 True                    False                  False
+    route_distance_km                 0.0835                       0.1012                 True                    False                  False
+       aging_aircraft                 0.0773                       0.0941                 True                    False                  False
+        is_fog_season                -0.0623                      -0.0902                 True                    False                  False
+          day_of_week                 0.0488                       0.0812                 True                    False                  False
+       departure_hour                 0.0558                       0.0620                 True                    False                  False
+          is_peak_day                 0.0187                       0.0429                 True                    False                  False
+                month                 0.0445                       0.0404                 True                    False                  False
+  destination_encoded                -0.0226                      -0.0189                 True                    False                  False
+       origin_encoded                 0.0063                       0.0008                 True                    False                  False
+     aircraft_encoded                 0.0008                      -0.0004                 True                    False                  False
+
+risk_score redundancy check:
+{
+  "present": true,
+  "used_as_model_input": false,
+  "formula": "0.25*weather_score + 0.35*historical_delay_rate + 0.15*crew_risk + 0.1*tight_turnaround + 0.08*is_fog_season + 0.07*is_peak_day",
+  "is_exact_deterministic_function_of_existing_features": true,
+  "max_reconstruction_error": 2.220446049250313e-16,
+  "corr_with_delay_label": 0.6886,
+  "corr_with_delay_probability": 0.8445,
+  "verdict": "risk_score is provably redundant with features already in FEATURE_COLUMNS (exact linear combination) and correlates with the label more strongly than any raw driver. Excluded from training \u2014 see train_model.py FEATURE_COLUMNS comment."
+}

@@ -1,0 +1,64 @@
+DOCUMENT STATUS: SYNTHETIC / DEMONSTRATION ONLY
+This is a fictional policy written for the AeroSync portfolio project. It
+is not sourced from, and must not be presented as, an actual airline
+customer-service policy or regulatory passenger-rights document.
+
+TITLE: AeroSync Passenger Rebooking Policy (Demo)
+DOCUMENT ID: AS-REBOOK-001
+
+## Purpose
+
+Defines how passengers on a disrupted flight are prioritized for
+rebooking, and the thresholds that trigger automatic versus manual
+rebooking.
+
+## Rebooking Priority Order
+
+When rebooking passengers from a cancelled or severely delayed flight
+(delay exceeding 180 minutes), priority is given in this order:
+
+1. Passengers with a documented medical or accessibility need.
+2. Passengers who will miss a connecting international flight.
+3. Passengers who will miss a connecting domestic flight.
+4. Unaccompanied minors.
+5. All other passengers, in order of original booking class (highest
+   fare class first), then check-in time.
+
+## Automatic vs. Manual Rebooking
+
+A passenger may be automatically rebooked onto an alternative flight
+without agent review if all of the following hold:
+
+- The alternative flight departs within 4 hours of the original
+  scheduled departure.
+- The alternative flight has available capacity in the same or higher
+  booking class.
+- The passenger has no special service request on file.
+
+If any of these conditions fail, the passenger should be queued for
+manual agent review rather than auto-rebooked.
+
+## Compensation Thresholds
+
+These thresholds govern which passengers are flagged for compensation
+review (final compensation decisions are outside the scope of this
+policy and this system):
+
+- Delay of 2–4 hours: flagged for meal voucher eligibility.
+- Delay over 4 hours or overnight: flagged for meal and accommodation
+  eligibility.
+- Cancellation with less than 24 hours' notice: flagged for compensation
+  review regardless of delay length of the replacement flight.
+
+## Group and Family Handling
+
+Passengers traveling together under a linked booking reference should be
+rebooked onto the same alternative flight whenever capacity allows, even
+if this means a later departure than the earliest individually available
+option.
+
+## Documentation
+
+Every rebooking action must be logged with: passenger reference, original
+flight, new flight, priority tier applied, and whether the rebooking was
+automatic or manually reviewed.

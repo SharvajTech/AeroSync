@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-09-27",
+  "ablations": {
+    "Full GNN": {
+      "Accuracy": 0.9789473684210527,
+      "ROC-AUC": 0.9990090424873034,
+      "Confusion": [
+        [
+          205,
+          2
+        ],
+        [
+          4,
+          74
+        ]
+      ]
+    },
+    "No Edges (Features Only)": {
+      "Accuracy": 0.8947368421052632,
+      "ROC-AUC": 0.9559023906849994,
+      "Confusion": [
+        [
+          184,
+          23
+        ],
+        [
+          7,
+          71
+        ]
+      ]
+    },
+    "Non-Graph Baseline (LR)": {
+      "Accuracy": 0.968421052631579,
+      "ROC-AUC": 0.9885420537594451,
+      "Confusion": [
+        [
+          202,
+          5
+        ],
+        [
+          4,
+          74
+        ]
+      ]
+    }
+  },
+  "insights": {
+    "graph_connectivity_gain": 0.043106651802304,
+    "vs_baseline_gain": 0.010466988727858229
+  }
+}

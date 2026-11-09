@@ -1,0 +1,86 @@
+{
+  "generated_at": "2026-09-28T00:40:34",
+  "dataset": {
+    "path": "data/flight_data.csv",
+    "synthetic": true,
+    "n_train": 8000,
+    "n_test": 2000,
+    "test_size": 0.2,
+    "random_state": 42,
+    "stratified": true,
+    "n_features": 20
+  },
+  "metrics": {
+    "Gradient Boosting": {
+      "Accuracy": 0.954,
+      "Precision": 0.959651,
+      "Recall": 0.941176,
+      "F1": 0.950324,
+      "ROC-AUC": 0.992195,
+      "Brier": 0.035651,
+      "Fit Time (s)": 5.292999,
+      "Inference (ms/sample)": 0.010329
+    },
+    "XGBoost": {
+      "Accuracy": 0.948,
+      "Precision": 0.950163,
+      "Recall": 0.937968,
+      "F1": 0.944026,
+      "ROC-AUC": 0.992187,
+      "Brier": 0.035387,
+      "Fit Time (s)": 0.635027,
+      "Inference (ms/sample)": 0.002599
+    },
+    "Stacking Ensemble (Calibrated)": {
+      "Accuracy": 0.95,
+      "Precision": 0.960309,
+      "Recall": 0.931551,
+      "F1": 0.945711,
+      "ROC-AUC": 0.991742,
+      "Brier": 0.036646,
+      "Fit Time (s)": 66.28924,
+      "Inference (ms/sample)": 0.396262
+    },
+    "Random Forest": {
+      "Accuracy": 0.9425,
+      "Precision": 0.947598,
+      "Recall": 0.928342,
+      "F1": 0.937871,
+      "ROC-AUC": 0.987809,
+      "Brier": 0.049331,
+      "Fit Time (s)": 0.896368,
+      "Inference (ms/sample)": 0.047335
+    },
+    "MLP": {
+      "Accuracy": 0.932,
+      "Precision": 0.93096,
+      "Recall": 0.922995,
+      "F1": 0.92696,
+      "ROC-AUC": 0.984778,
+      "Brier": 0.048867,
+      "Fit Time (s)": 0.997216,
+      "Inference (ms/sample)": 0.0008
+    },
+    "Logistic Regression": {
+      "Accuracy": 0.929,
+      "Precision": 0.927724,
+      "Recall": 0.919786,
+      "F1": 0.923738,
+      "ROC-AUC": 0.984759,
+      "Brier": 0.049752,
+      "Fit Time (s)": 0.072546,
+      "Inference (ms/sample)": 0.000245
+    }
+  },
+  "best_per_metric": {
+    "Accuracy": "Gradient Boosting",
+    "Precision": "Stacking Ensemble (Calibrated)",
+    "Recall": "Gradient Boosting",
+    "F1": "Gradient Boosting",
+    "ROC-AUC": "Gradient Boosting",
+    "Brier": "XGBoost",
+    "Fit Time (s)": "Logistic Regression",
+    "Inference (ms/sample)": "Logistic Regression"
+  },
+  "note": "No model is universally best across every metric. Model selection should be driven by which metric matters most for the deployment context, not by accuracy alone."
+}
