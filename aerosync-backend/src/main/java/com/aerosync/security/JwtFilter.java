@@ -32,6 +32,14 @@ public class JwtFilter extends OncePerRequestFilter {
         "/api/gates"
     );
 
+    // Read-only operational network endpoints (graph + airport operations)
+    // used by the dashboard. Only GET/HEAD/OPTIONS are public, so any write
+    // endpoint added under these prefixes later still requires a token.
+    private static final List<String> PUBLIC_READ_ONLY_PREFIXES = List.of(
+        "/api/graph",
+        "/api/airports"
+    );
+
     @Override
     protected void doFilterInternal(
             HttpServletRequest  request,
@@ -42,7 +50,8 @@ public class JwtFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
 
         // Skip JWT for public endpoints
-        if (PUBLIC_PATHS.stream().anyMatch(path::startsWith)) {
+        if (PUBLIC_PATHS.stream().anyMatch(path::startsWith)
+                || isPublicReadOnly(request.getMethod(), path)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -75,5 +84,13 @@ public class JwtFilter extends OncePerRequestFilter {
 
         log.debug("JWT valid — airport: {} role: {}", airport, role);
         filterChain.doFilter(request, response);
+    }
+
+    static boolean isPublicReadOnly(String method, String path) {
+        boolean safeMethod = "GET".equalsIgnoreCase(method)
+                || "HEAD".equalsIgnoreCase(method)
+                || "OPTIONS".equalsIgnoreCase(method);
+        return safeMethod && PUBLIC_READ_ONLY_PREFIXES.stream()
+                .anyMatch(prefix -> path.equals(prefix) || path.startsWith(prefix + "/"));
     }
 }

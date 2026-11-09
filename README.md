@@ -245,6 +245,14 @@ Example response from `POST /predict` includes `delay_probability`, `risk_level`
 | `POST` | `/api/agents/resolve/{id}` | Auto-resolve disruption |
 | `POST` | `/api/agents/propose/{id}` | Propose resolution |
 | `POST` | `/api/auth/login` | JWT authentication |
+| `GET` | `/api/graph/network?date=` | Operational network graph: airports, flight instances, route edges, dependencies |
+| `GET` | `/api/graph/airports/{iata}?date=` | One airport with its departing/arriving flights and their dependencies |
+| `GET` | `/api/graph/flights/{flightId}?depth=` | A flight instance with upstream/downstream dependencies |
+| `GET` | `/api/graph/flights/{flightId}/affected` | Flights reachable downstream through dependencies |
+| `GET` | `/api/airports` / `/api/airports/{iata}/operations?date=` | Airports; departures, arrivals and gates of one airport |
+
+The operational network graph (Stage 1) is documented in
+[`aerosync-backend/docs/OPERATIONAL_NETWORK.md`](aerosync-backend/docs/OPERATIONAL_NETWORK.md).
 
 **Trigger disruption example**
 

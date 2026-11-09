@@ -67,18 +67,14 @@ class AgentServiceTest {
 
         when(disruptionRepository.findById(1L)).thenReturn(Optional.of(disruption));
         when(flightRepository.findByFlightId("AI-101")).thenReturn(Optional.of(flight));
-        when(gateRepository.findByAvailableTrue()).thenReturn(List.of());
-        when(crewRepository.findByAvailableTrue()).thenReturn(List.of());
     }
 
     @Test
     void proposeResolution_stillReturnsDeterministicResolution_whenGeminiFails() {
         // Gemini call fails — simulates an outage / API error / timeout.
         WebClient failingGeminiClient = Mockito.mock(WebClient.class, Mockito.RETURNS_DEEP_STUBS);
-        when(failingGeminiClient.post().uri(any(String.class)).bodyValue(any())
-                .retrieve().bodyToMono(String.class)
-                .timeout(any(Duration.class)).block())
-                .thenThrow(new RuntimeException("Gemini unreachable"));
+        when(failingGeminiClient.post())
+        .thenThrow(new RuntimeException("Gemini unreachable"));
 
         // RAG also reports unavailable, to isolate the LLM-failure path from
         // any RAG behaviour (RagServiceTest already covers RAG on its own).
