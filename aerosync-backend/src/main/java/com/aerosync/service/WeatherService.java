@@ -1,5 +1,6 @@
 package com.aerosync.service;
 
+import com.aerosync.security.LogRedaction;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -96,8 +97,9 @@ public class WeatherService {
             return score;
 
         } catch (Exception e) {
+            // The request URL carries the API key: never log the raw message.
             log.warn("Weather fetch failed for {}: {}",
-                    airportCode, e.getMessage());
+                    airportCode, LogRedaction.redact(e.getMessage()));
             return 1; // safe default
         }
     }

@@ -5,11 +5,13 @@ import { MetricCards, type Metric } from '../components/common/MetricCards';
 import { ErrorState } from '../components/common/States';
 import { PageHeader } from '../components/layout/PageHeader';
 import type { RouteName } from '../hooks/useHashRoute';
+import { useAirport } from '../state/AirportContext';
 import { useOperatingDate } from '../state/OperatingDate';
 import { NETWORK_SCOPE, type GraphScope, type Selection } from '../state/selection';
 import { formatDateShort } from '../utils/format';
 
 export function DashboardPage({ navigate }: { navigate: (route: RouteName, params?: Record<string, string | null | undefined>) => void }) {
+  const { airport } = useAirport();
   const { date, network } = useOperatingDate();
   const [scope, setScope] = useState<GraphScope>(NETWORK_SCOPE);
   const [selection, setSelection] = useState<Selection>(null);
@@ -43,7 +45,7 @@ export function DashboardPage({ navigate }: { navigate: (route: RouteName, param
     <>
       <PageHeader
         title="Flight Network Dashboard"
-        subtitle="Airport and flight connections across the operational network"
+        subtitle={`${airport.airport_name} (${airport.iata_code}) · flights departing from or arriving at ${airport.city}`}
       />
       {network.error && !network.data ? (
         <ErrorState error={network.error} onRetry={network.reload} />

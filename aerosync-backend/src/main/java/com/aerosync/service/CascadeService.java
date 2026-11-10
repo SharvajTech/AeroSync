@@ -3,6 +3,7 @@ package com.aerosync.service;
 import com.aerosync.model.Disruption;
 import com.aerosync.model.Flight;
 import com.aerosync.repository.FlightRepository;
+import com.aerosync.security.AirportScope;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,6 +22,14 @@ public class CascadeService {
     // Finds all connected flights and resolves them algorithmically
     public Map<String, Object> resolveCascade(
             String originFlightId, int delayMinutes) {
+        return resolveCascade(originFlightId, delayMinutes, AirportScope.unrestricted());
+    }
+
+    // Stage 3: only connected flights departing from an airport in scope are
+    // disrupted and re-resolved; flights of other airports are left to the
+    // users of those airports and are not listed.
+    public Map<String, Object> resolveCascade(
+            String originFlightId, int delayMinutes, AirportScope scope) {
 
         log.info("🔗 Cascade resolution from: {} delay: {}min",
                 originFlightId, delayMinutes);
@@ -35,6 +44,11 @@ public class CascadeService {
                 .findByOriginAndStatus(
                         origin.getDestination(),
                         Flight.FlightStatus.SCHEDULED);
+
+        boolean connectionAirportInScope = scope.canOperate(origin.getDestination());
+        if (!connectionAirportInScope) {
+            connected = List.of();
+        }
 
         log.info("Found {} connected flights", connected.size());
 
@@ -69,12 +83,16 @@ public class CascadeService {
                     flight.getFlightId(), propagatedDelay);
         }
 
-        return Map.of(
-                "origin_flight",       originFlightId,
-                "initial_delay",       delayMinutes,
-                "flights_cascaded",    cascadeResolutions.size(),
-                "cascade_resolutions", cascadeResolutions,
-                "total_cascade_cost",  totalCost
-        );
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("origin_flight",       originFlightId);
+        result.put("initial_delay",       delayMinutes);
+        result.put("flights_cascaded",    cascadeResolutions.size());
+        result.put("cascade_resolutions", cascadeResolutions);
+        result.put("total_cascade_cost",  totalCost);
+        if (!connectionAirportInScope) {
+            result.put("cascade_scope_note", "Connecting flights departing from " + origin.getDestination()
+                    + " were not changed: that airport is outside your authorized airports.");
+        }
+        return result;
     }
 }

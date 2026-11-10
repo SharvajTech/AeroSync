@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LuClock, LuPlaneLanding, LuPlaneTakeoff, LuTriangleAlert } from 'react-icons/lu';
 import { api, keys } from '../api/endpoints';
 import type { FlightMovement } from '../api/types';
@@ -9,9 +9,10 @@ import { EmptyState, ErrorState, LoadingState } from '../components/common/State
 import { Tabs } from '../components/common/Tabs';
 import { DetailsPanel } from '../components/details/DetailsPanel';
 import { PageHeader } from '../components/layout/PageHeader';
-import { flightNodes } from '../graph/model';
+import { DisruptionsPanel } from '../components/operations/DisruptionsPanel';
 import type { RouteName } from '../hooks/useHashRoute';
 import { useResource } from '../hooks/useResource';
+import { useAirport } from '../state/AirportContext';
 import { useOperatingDate } from '../state/OperatingDate';
 import type { Selection } from '../state/selection';
 import { delayLabel, flightStatusTone, formatDateLong, isDelayed, localClock, titleCase } from '../utils/format';
@@ -20,18 +21,19 @@ type Navigate = (route: RouteName, params?: Record<string, string | null | undef
 type Board = 'departures' | 'arrivals';
 
 export function OperationsPage({ params, navigate }: { params: Record<string, string>; navigate: Navigate }) {
-  const { date, network } = useOperatingDate();
-  const airports = useResource(keys.airports(), () => api.airports());
+  const { date } = useOperatingDate();
+  const { airport, airports, setAirport, isAuthorized, user } = useAirport();
   const [board, setBoard] = useState<Board>('departures');
   const [selection, setSelection] = useState<Selection>(null);
 
-  // Default to the busiest airport of the day when none is in the URL.
-  const busiest = useMemo(() => {
-    const counts = new Map<string, number>();
-    flightNodes(network.data).forEach((f) => counts.set(f.origin_airport, (counts.get(f.origin_airport) ?? 0) + 1));
-    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0];
-  }, [network.data]);
-  const iata = (params.airport ?? busiest ?? airports.data?.[0]?.iata_code ?? null)?.toUpperCase() ?? null;
+  // The board always shows the selected airport. A deep link (?airport=) to
+  // another of the user's airports switches to it; other airports are refused.
+  const requested = params.airport?.toUpperCase() ?? null;
+  const forbidden = requested !== null && !isAuthorized(requested);
+  useEffect(() => {
+    if (requested && !forbidden && requested !== airport.iata_code) setAirport(requested);
+  }, [requested, forbidden, airport.iata_code, setAirport]);
+  const iata = forbidden ? null : airport.iata_code;
 
   const operations = useResource(iata ? keys.airportOperations(iata, date) : null, () => api.airportOperations(iata as string, date));
   const ops = operations.data;
@@ -49,7 +51,14 @@ export function OperationsPage({ params, navigate }: { params: Record<string, st
   ];
 
   let content;
-  if (!iata || (operations.loading && !ops)) content = <LoadingState label="Loading operations…" />;
+  if (forbidden) {
+    content = (
+      <EmptyState
+        title={`Not authorized for ${requested}`}
+        detail={`Your account can operate ${airports.map((a) => a.iata_code).join(', ')}.`}
+      />
+    );
+  } else if (!iata || (operations.loading && !ops)) content = <LoadingState label="Loading operations…" />;
   else if (operations.error) content = <ErrorState error={operations.error} onRetry={operations.reload} />;
   else if (ops) {
     const rows = board === 'departures' ? ops.departures : ops.arrivals;
@@ -75,12 +84,15 @@ export function OperationsPage({ params, navigate }: { params: Record<string, st
             <span className="field__label">Airport</span>
             <select
               className="select"
-              value={iata ?? ''}
-              onChange={(event) => navigate('operations', { airport: event.target.value })}
+              value={airport.iata_code}
+              onChange={(event) => {
+                setAirport(event.target.value);
+                navigate('operations');
+              }}
               aria-label="Airport"
-              disabled={!airports.data}
+              disabled={airports.length < 2}
             >
-              {(airports.data ?? []).map((a) => (
+              {airports.map((a) => (
                 <option key={a.iata_code} value={a.iata_code}>{a.iata_code} · {a.city}</option>
               ))}
             </select>
@@ -127,6 +139,7 @@ export function OperationsPage({ params, navigate }: { params: Record<string, st
           onShowAffected={(flightId) => navigate('network', { flight: flightId, view: 'affected' })}
         />
       </div>
+      {iata && <DisruptionsPanel airport={iata} canOperate={user.can_operate} />}
     </>
   );
 }

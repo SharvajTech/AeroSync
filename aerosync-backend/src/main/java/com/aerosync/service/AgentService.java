@@ -8,6 +8,8 @@ import com.aerosync.repository.CrewRepository;
 import com.aerosync.repository.DisruptionRepository;
 import com.aerosync.repository.FlightRepository;
 import com.aerosync.repository.GateRepository;
+import com.aerosync.security.AirportScope;
+import com.aerosync.security.LogRedaction;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -86,6 +88,15 @@ public class AgentService {
 // 2. Gemini ONLY generates human-readable explanation
 // 3. Cascade handled by CascadeService
     public Map<String, Object> resolveDisruption(Long disruptionId) {
+        return resolveDisruption(disruptionId, AirportScope.unrestricted());
+    }
+
+    /**
+     * Stage 3: as {@link #resolveDisruption(Long)}, with the cascade limited to
+     * flights departing from airports in {@code scope}. The caller has already
+     * authorized the disruption itself (DisruptionAccessService).
+     */
+    public Map<String, Object> resolveDisruption(Long disruptionId, AirportScope scope) {
 
         long startTime = System.currentTimeMillis();
 
@@ -122,7 +133,8 @@ public class AgentService {
                 cascadeService.resolveCascade(
                         flight.getFlightId(),
                         disruption.getDelayMinutes() != null
-                                ? disruption.getDelayMinutes() : 60);
+                                ? disruption.getDelayMinutes() : 60,
+                        scope);
         algorithmicResolution.put("cascade_result", cascadeResult);
 
         // STEP 4 — Add metadata
@@ -493,12 +505,13 @@ private String buildAlgorithmicExplanation(
                         )
                 );
 
-                String uri = String.format("/%s:generateContent?key=%s",
-                        geminiModel, geminiApiKey);
+                // Key in a header, not the URL: request URLs end up in exception messages and logs.
+                String uri = String.format("/%s:generateContent", geminiModel);
 
                 String responseStr = geminiWebClient
                         .post()
                         .uri(uri)
+                        .header("x-goog-api-key", geminiApiKey)
                         .bodyValue(requestBody)
                         .retrieve()
                         .onStatus(
@@ -580,7 +593,7 @@ private String buildAlgorithmicExplanation(
                         }
                     }
                 } else {
-                    log.error("Non-rate-limit Gemini error: {}", msg);
+                    log.error("Non-rate-limit Gemini error: {}", LogRedaction.redact(msg));
                     break;
                 }
             }
@@ -930,6 +943,19 @@ private String buildAlgorithmicExplanation(
     public Map<String, Object> applyApprovedResolution(
             Long disruptionId,
             Map<String, Object> approvedResolution) {
+        return applyApprovedResolution(disruptionId, approvedResolution, AirportScope.unrestricted());
+    }
+
+    /**
+     * Stage 3: as {@link #applyApprovedResolution(Long, Map)}, with the cascade
+     * limited to flights departing from airports in {@code scope}. Gate targets
+     * of other airports in the approved body are ignored by
+     * {@link ResolutionAlgorithmService} (gate airport check).
+     */
+    public Map<String, Object> applyApprovedResolution(
+            Long disruptionId,
+            Map<String, Object> approvedResolution,
+            AirportScope scope) {
 
         long startTime = System.currentTimeMillis();
 
@@ -953,7 +979,8 @@ private String buildAlgorithmicExplanation(
         Map<String, Object> cascade = cascadeService.resolveCascade(
             flight.getFlightId(),
             disruption.getDelayMinutes() != null
-                ? disruption.getDelayMinutes() : 60);
+                ? disruption.getDelayMinutes() : 60,
+            scope);
 
         approvedResolution.put("cascade_result",    cascade);
         approvedResolution.put("approved_by_human", true);

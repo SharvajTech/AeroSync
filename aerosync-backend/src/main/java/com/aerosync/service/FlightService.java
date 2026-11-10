@@ -3,6 +3,7 @@ package com.aerosync.service;
 import com.aerosync.dto.FlightPredictionResponse;
 import com.aerosync.model.Flight;
 import com.aerosync.repository.FlightRepository;
+import com.aerosync.security.AirportScope;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -22,6 +23,59 @@ public class FlightService {
 
     public List<Flight> getAllFlights() {
         return flightRepository.findAll();
+    }
+
+    // ── Airport-scoped access (Stage 3) ──────────────────────────────────────
+    // A flight is visible to the airports it departs from or arrives at, and
+    // can be changed by its departure airport (AirportScope).
+
+    /** Flights departing from or arriving at an airport in scope. */
+    public List<Flight> getFlights(AirportScope scope) {
+        if (scope.isUnrestricted()) {
+            return flightRepository.findAll();
+        }
+        return scope.airports().isEmpty() ? List.of() : flightRepository.findTouchingAirports(scope.airports());
+    }
+
+    /** One flight; 403 when it neither departs from nor arrives at an airport in scope. */
+    public Flight getVisibleFlight(String flightId, AirportScope scope) {
+        Flight flight = getFlightById(flightId);
+        scope.requireView(flight.getOrigin(), flight.getDestination(), "Flight " + flight.getFlightId());
+        return flight;
+    }
+
+    public List<Flight> getFlightsByRisk(String riskLevel, AirportScope scope) {
+        return getFlightsByRisk(riskLevel).stream()
+                .filter(flight -> scope.canView(flight.getOrigin(), flight.getDestination()))
+                .toList();
+    }
+
+    public List<Flight> getDisruptedFlights(AirportScope scope) {
+        return getDisruptedFlights().stream()
+                .filter(flight -> scope.canView(flight.getOrigin(), flight.getDestination()))
+                .toList();
+    }
+
+    /** Creates a flight; 403 unless it departs from an airport in scope. */
+    public Flight createFlight(Flight flight, AirportScope scope) {
+        scope.requireOperate(flight.getOrigin(), "The new flight");
+        return createFlight(flight);
+    }
+
+    /** Status change; 403 unless the flight departs from an airport in scope. */
+    public Flight updateStatus(String flightId, Flight.FlightStatus status, AirportScope scope) {
+        Flight flight = getFlightById(flightId);
+        scope.requireOperate(flight.getOrigin(), "Flight " + flight.getFlightId());
+        return updateStatus(flightId, status);
+    }
+
+    /** ML predictions for the flights departing from airports in scope. */
+    public int predictFlights(AirportScope scope) {
+        List<Flight> flights = scope.isUnrestricted()
+                ? flightRepository.findAll()
+                : scope.airports().isEmpty() ? List.of() : flightRepository.findByOriginIn(scope.airports());
+        predict(flights);
+        return flights.size();
     }
 
     public Flight getFlightById(String flightId) {
@@ -80,7 +134,10 @@ public class FlightService {
 
     // ── Predict all flights with live weather ─────────────────────────────────
     public void predictAllFlights() {
-        List<Flight> flights = flightRepository.findAll();
+        predict(flightRepository.findAll());
+    }
+
+    private void predict(List<Flight> flights) {
         log.info("Running ML predictions on {} flights...",
                 flights.size());
 

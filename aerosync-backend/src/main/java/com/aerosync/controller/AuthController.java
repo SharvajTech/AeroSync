@@ -1,105 +1,54 @@
 package com.aerosync.controller;
 
-import com.aerosync.security.JwtUtil;
+import com.aerosync.dto.auth.LoginRequest;
+import com.aerosync.dto.auth.LoginResponse;
+import com.aerosync.dto.auth.UserProfileDto;
+import com.aerosync.exception.InvalidRequestParameterException;
+import com.aerosync.security.AuthenticatedUser;
+import com.aerosync.service.AuthService;
+import com.aerosync.service.AuthService.LoginResult;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-import java.util.List;
-import java.util.Map;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Login and the current user. {@code POST /api/auth/login} is public; every
+ * other endpoint of the backend needs the returned bearer token.
+ */
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
 @CrossOrigin(origins = {"http://localhost:3000"})
 public class AuthController {
 
-    private final JwtUtil jwtUtil;
+    private final AuthService authService;
 
-    // Predefined airport credentials for demo
-    // In production: store hashed passwords in DB
-    private static final Map<String, Map<String, String>> AIRPORTS = Map.of(
-            "BOM", Map.of(
-                    "name",     "Chhatrapati Shivaji International",
-                    "city",     "Mumbai",
-                    "password", "bom2024",
-                    "role",     "OPERATIONS_CONTROLLER"
-            ),
-            "DEL", Map.of(
-                    "name",     "Indira Gandhi International",
-                    "city",     "Delhi",
-                    "password", "del2024",
-                    "role",     "OPERATIONS_CONTROLLER"
-            ),
-            "BLR", Map.of(
-                    "name",     "Kempegowda International",
-                    "city",     "Bangalore",
-                    "password", "blr2024",
-                    "role",     "OPERATIONS_CONTROLLER"
-            ),
-            "HYD", Map.of(
-                    "name",     "Rajiv Gandhi International",
-                    "city",     "Hyderabad",
-                    "password", "hyd2024",
-                    "role",     "OPERATIONS_CONTROLLER"
-            )
-    );
-
-    // GET /api/auth/airports — list all available airports
-    @GetMapping("/airports")
-    public ResponseEntity<?> getAirports() {
-        return ResponseEntity.ok(
-                AIRPORTS.entrySet().stream()
-                        .map(e -> Map.of(
-                                "code", e.getKey(),
-                                "name", e.getValue().get("name"),
-                                "city", e.getValue().get("city")
-                        ))
-                        .toList()
-        );
-    }
-
-    // POST /api/auth/login
-    // Body: { "airport_code": "BOM", "password": "bom2024" }
+    // POST /api/auth/login   Body: { "username": "bom.ops", "password": "..." }
     @PostMapping("/login")
-    public ResponseEntity<?> login(
-            @RequestBody Map<String, String> body) {
-
-        String code     = body.get("airport_code");
-        String password = body.get("password");
-
-        if (code == null || !AIRPORTS.containsKey(code)) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("error", "Unknown airport: " + code));
+    public ResponseEntity<LoginResponse> login(@RequestBody(required = false) LoginRequest body,
+                                               HttpServletRequest request) {
+        if (body == null) {
+            throw new InvalidRequestParameterException("Username and password are required");
         }
-
-        Map<String, String> airport = AIRPORTS.get(code);
-
-        if (!airport.get("password").equals(password)) {
-            return ResponseEntity.status(401)
-                    .body(Map.of("error", "Invalid credentials"));
-        }
-
-        String token = jwtUtil.generateToken(
-                code, airport.get("role"));
-
-        return ResponseEntity.ok(Map.of(
-                "token",        token,
-                "airport_code", code,
-                "airport_name", airport.get("name"),
-                "role",         airport.get("role"),
-                "message",      "Login successful"
-        ));
+        LoginResult result = authService.login(body.username(), body.password(), request.getRemoteAddr());
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(new LoginResponse(result.token().token(), "Bearer", result.token().expiresAt(),
+                        result.profile()));
     }
 
-    // GET /api/auth/me — get current airport from token
+    // GET /api/auth/me — the signed-in user with their authorized airports
     @GetMapping("/me")
-    public ResponseEntity<?> me(
-            jakarta.servlet.http.HttpServletRequest request) {
-        String airport = (String) request.getAttribute("airport");
-        String role    = (String) request.getAttribute("role");
-        return ResponseEntity.ok(Map.of(
-                "airport", airport,
-                "role",    role
-        ));
+    public ResponseEntity<UserProfileDto> me(AuthenticatedUser user) {
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(authService.profile(user));
     }
 }

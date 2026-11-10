@@ -48,9 +48,15 @@ services:
       ML_SERVICE_URL: http://ml-service:8000
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
-      JWT_SECRET: ${JWT_SECRET:-THIS_IS_ONLY_FOR_LOCAL_DEVELOPMENT_123456789}
-      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      # Set JWT_SECRET (32+ characters) in .env; when empty the backend uses a
+      # random per-start key, so sessions end on every restart.
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-28800000}
       WEATHER_API_KEY: ${WEATHER_API_KEY:-}
+      # Development-only demo accounts (off unless enabled in .env; no default password).
+      AEROSYNC_DEMO_USERS_ENABLED: ${AEROSYNC_DEMO_USERS_ENABLED:-false}
+      AEROSYNC_DEMO_PASSWORD: ${AEROSYNC_DEMO_PASSWORD:-}
+      AEROSYNC_DEMO_USERS: "${AEROSYNC_DEMO_USERS:-bom.ops=BOM:OPERATIONS_CONTROLLER;del.ops=DEL:OPERATIONS_CONTROLLER;network.ops=BOM,DEL,BLR,HYD:OPERATIONS_CONTROLLER;bom.viewer=BOM:OPERATIONS_VIEWER}"
     depends_on:
       postgres:
         condition: service_healthy

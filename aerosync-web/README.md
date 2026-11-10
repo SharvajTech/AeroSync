@@ -2,7 +2,8 @@
 
 React + TypeScript dashboard for the Stage 1 operational network APIs: a hybrid
 airport + flight graph, airport and flight details, searchable airport and
-flight lists and an airport operations board.
+flight lists, an airport operations board and (Stage 3) sign-in with
+airport-scoped access, disruptions and resolution approval.
 
 The Streamlit app in `aerosync-dashboard/` is unchanged; this is a separate
 front end on port 3000 (the port the backend's CORS configuration already allows).
@@ -29,8 +30,47 @@ BACKEND_URL=http://localhost:8081 npm run dev
 | `VITE_API_BASE_URL` | browser bundle, build time | Optional. Call the backend directly (e.g. `http://localhost:8080`) instead of through the proxy. Leave empty for same-origin `/api`. |
 | `BACKEND_UPSTREAM` | Docker image (nginx) | Where nginx proxies `/api` (default `http://backend:8080`). |
 
-No credentials are needed or stored: the graph and airport endpoints are
-public `GET` endpoints of the backend.
+## Sign-in and airport access
+
+The dashboard has no data of its own: every request goes to the backend with
+the user's token, and the backend decides what the user may see (see
+[`aerosync-backend/docs/SECURITY.md`](../aerosync-backend/docs/SECURITY.md)).
+For local accounts, enable the backend's demo users (root README, "Sign in").
+
+- **Login page.**
+  - Username and password are checked in the form, then by
+    `POST /api/auth/login`.
+  - Wrong credentials, a locked account (429) or an unreachable backend each
+    get their own message. Passwords are never stored.
+- **Session.**
+  - The token, its expiry and the user profile are kept in `sessionStorage`
+    (`aerosync.session`): a reload keeps you signed in, closing the tab signs
+    you out, and other tabs need their own sign-in.
+  - On start the session is checked with `GET /api/auth/me`.
+  - The session ends at the token's expiry, on **Sign out** (profile menu) or
+    on any 401. The login page then says why (expired, signed out, account
+    disabled).
+- **Protected routes.** No page, not even its layout, renders without a
+  session.
+- **Airport selector** (top bar).
+  - It only lists the airports assigned to the user and is shown as a plain
+    label when there is only one. The choice is remembered per user.
+  - Switching airports clears the previous airport's data and graph state.
+    Network, flights, disruptions and operations are loaded for the selected
+    airport only.
+- **403.** A deep link or a hand-edited `?airport=` / flight id for another
+  airport shows "Not authorized"; the other endpoint airport of a flight only
+  shows its name, not its operations.
+- **Disruptions panel** (`#/operations`): active disruptions of the airport.
+  Operations controllers can propose, approve (applies gate and crew changes)
+  or reject a resolution and report a disruption; viewers see a read-only
+  notice. Flights departing elsewhere are marked as handled by their departure
+  airport.
+
+The Docker image's nginx sends a Content-Security-Policy that only allows the
+app's own scripts and same-origin connections (`connect-src 'self'`). If you
+build with `VITE_API_BASE_URL` pointing at another origin, add that origin to
+`connect-src` in `nginx/default.conf.template`.
 
 ## Scripts
 
@@ -57,8 +97,8 @@ uses `npm ci`.
 | `#/network` | Full-size graph. Deep links: `?airport=BLR`, `?flight=<flight_instance_id>&depth=2`, `?flight=<id>&view=affected&horizon=24`, `?select=BOM` |
 | `#/airports` | Searchable airport list with daily movements and dependency counts |
 | `#/flights` | Flight instances of the date; filters for airport, status, delay status and airline |
-| `#/operations?airport=BLR` | Departures/arrivals board and gates of one airport |
-| `#/settings` | Read-only connection, data window and data origin information |
+| `#/operations?airport=BLR` | Departures/arrivals board, gates and disruptions of one of your airports |
+| `#/settings` | Signed-in account, connection, data window and data origin information |
 
 The operating date (top bar) applies to every page. It starts at the backend's
 `service_date`; the top bar shows the backend's `data_window`, and a date
@@ -88,17 +128,19 @@ without flights shows an empty state with a link to the first date that has data
 
 ```
 src/
-  api/          types mirroring the backend DTOs, fetch client (errors, timeouts), request cache, endpoints
+  api/          types mirroring the backend DTOs, fetch client (bearer token, errors, timeouts), request cache, endpoints
+  auth/         session storage, AuthStore (login, restore, logout, expiry), credential validation, AuthProvider
   graph/        layout.ts and model.ts (pure: response -> drawable graph), style.ts, NetworkGraph.tsx (Cytoscape)
   components/   layout (sidebar, top bar), common (cards, states, legend), details panels, graph panel
   pages/        one component per route
   hooks/        resource loading, hash routing, graph scope loading, backend status
-  state/        operating date context, selection and scope types
+  state/        signed-in airport selection, operating date context, selection and scope types
   utils/        formatting and filters
   test/         fixtures used only by tests
 ```
 
-Each network response is fetched once per date and cached for 60 s;
+Each network response is fetched once per airport and date and cached for 60 s
+(the cache is emptied on sign-in and sign-out);
 concurrent requests for the same URL share one request and failed requests
 are never cached. The dashboard contains no mock data: everything shown comes
 from the backend, and the "Synthetic data" badge reflects the backend's

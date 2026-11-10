@@ -1,5 +1,8 @@
 package com.aerosync.network;
 
+import com.aerosync.model.AppUser;
+import com.aerosync.model.UserRole;
+import com.aerosync.security.JwtFilter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,17 +20,32 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** HTTP contract of the graph and airport operations endpoints (snake_case JSON, error codes). */
+/**
+ * HTTP contract of the graph and airport operations endpoints (snake_case JSON, error codes).
+ *
+ * <p>Since Stage 3 these endpoints need a token; requests run through the real
+ * {@link JwtFilter} as a user assigned to every airport, so the expected
+ * national-network contents are unchanged. Airport scoping itself is covered
+ * by AirportScopedAccessIntegrationTest.</p>
+ */
 class GraphApiIntegrationTest extends OperationalNetworkTestSupport {
 
     @Autowired
     WebApplicationContext context;
 
+    @Autowired
+    JwtFilter jwtFilter;
+
     MockMvc mvc;
 
     @BeforeEach
     void setUp() {
-        mvc = MockMvcBuilders.webAppContextSetup(context).build();
+        insertReferenceAirports();
+        AppUser allAirports = user("all.airports", UserRole.OPERATIONS_VIEWER, true, allAirportCodes());
+        mvc = MockMvcBuilders.webAppContextSetup(context)
+                .addFilters(jwtFilter)
+                .defaultRequest(get("/").header("Authorization", bearer(allAirports)))
+                .build();
     }
 
     @Test

@@ -1305,3 +1305,337 @@ button.chip:hover {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ── Stage 3: authentication, airport scope, disruptions ─────────────────── */
+
+.button--primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.button--primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field__error {
+  font-size: 12.5px;
+  color: var(--color-danger);
+}
+
+.input {
+  height: 38px;
+  width: 100%;
+  padding: 0 var(--space-3);
+  font: inherit;
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+}
+
+.input:focus {
+  outline: 2px solid var(--color-primary-border);
+  outline-offset: 0;
+  border-color: var(--color-primary);
+}
+
+.input--invalid {
+  border-color: var(--color-danger);
+}
+
+.input--small {
+  height: 30px;
+  width: auto;
+  min-width: 240px;
+  flex: 1 1 240px;
+  font-size: 13px;
+}
+
+.input-group {
+  position: relative;
+  display: flex;
+}
+
+.input-group .input {
+  padding-right: 44px;
+}
+
+.input-group__button {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  border: none;
+}
+
+.notice {
+  margin: 0 0 var(--space-3);
+  padding: 10px var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.notice--info {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-border);
+  color: var(--color-info);
+}
+
+.notice--success {
+  background: var(--color-success-soft);
+  border-color: var(--color-success-border);
+  color: var(--color-success);
+}
+
+.notice--danger {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+}
+
+/* Login */
+.login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  background: var(--color-bg);
+}
+
+.login__card {
+  width: min(400px, 100%);
+  padding: var(--space-8);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.login__card--compact {
+  padding: var(--space-6) var(--space-8);
+}
+
+.login__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+  color: var(--color-primary);
+}
+
+.login__brand .brand__mark {
+  width: 24px;
+  height: 24px;
+}
+
+.login__brand-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.login__title {
+  margin: 0 0 var(--space-1);
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.login__lead {
+  margin: 0 0 var(--space-5);
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.login__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.login__form .button--block {
+  height: 40px;
+  margin-top: var(--space-1);
+}
+
+.login__footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}
+
+.login__scope,
+.login__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.login__scope svg {
+  width: 14px;
+  height: 14px;
+  color: var(--color-success);
+}
+
+/* Airport selector (top bar) */
+.airport-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 36px;
+  padding: 0 var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+}
+
+.airport-selector svg {
+  width: 16px;
+  height: 16px;
+  color: var(--color-primary);
+}
+
+.airport-selector__code {
+  font-weight: 650;
+}
+
+.airport-selector__name {
+  color: var(--color-text-secondary);
+}
+
+.airport-selector--select {
+  padding-right: 0;
+}
+
+.airport-selector--select select {
+  height: 34px;
+  padding: 0 28px 0 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-text);
+  background: transparent
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    no-repeat right 10px center;
+  border: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.topbar__context {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.table__strong {
+  font-weight: 600;
+}
+
+/* Profile menu */
+.avatar {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.profile__airports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: var(--space-3) 0;
+}
+
+.chip--static {
+  cursor: default;
+}
+
+.profile__menu .button--block {
+  margin-top: var(--space-2);
+}
+
+/* Disruptions and resolutions */
+.disruptions {
+  margin-top: var(--space-5);
+}
+
+.table__actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.proposal-row > td {
+  background: var(--color-surface-muted);
+}
+
+.proposal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.proposal__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.proposal__sections {
+  grid-template-columns: 110px minmax(0, 1fr);
+}
+
+.kv__row {
+  display: contents;
+}
+
+.proposal__explanation {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  white-space: pre-line;
+}
+
+.proposal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.report-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-muted);
+}
+
+.report-form .input {
+  width: 110px;
+}
+
+.report-form__actions {
+  display: flex;
+  gap: var(--space-2);
+}

@@ -4,17 +4,24 @@ import com.aerosync.model.Aircraft;
 import com.aerosync.model.AircraftStatus;
 import com.aerosync.model.Airport;
 import com.aerosync.model.AirportStatus;
+import com.aerosync.model.AppUser;
 import com.aerosync.model.DataOrigin;
 import com.aerosync.model.DependencyType;
 import com.aerosync.model.FlightInstance;
+import com.aerosync.model.UserRole;
 import com.aerosync.repository.AircraftRepository;
 import com.aerosync.repository.AirportRepository;
+import com.aerosync.repository.AppUserRepository;
+import com.aerosync.security.AirportScope;
+import com.aerosync.security.AuthenticatedUser;
+import com.aerosync.security.JwtUtil;
 import com.aerosync.service.DataSeederService;
 import com.aerosync.service.FlightNetworkService;
 import com.aerosync.service.FlightNetworkService.NewDependency;
 import com.aerosync.service.FlightNetworkService.NewFlight;
 import com.aerosync.synthetic.ReferenceAirports;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -25,7 +32,9 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Spring context with the in-memory H2 test database. Every test runs in a
@@ -52,6 +61,47 @@ abstract class OperationalNetworkTestSupport {
 
     @Autowired
     FlightNetworkService flightNetworkService;
+
+    @Autowired
+    AppUserRepository appUserRepository;
+
+    @Autowired
+    PasswordEncoder passwordEncoder;
+
+    @Autowired
+    JwtUtil jwtUtil;
+
+    /** Password of every user created by {@link #user}. Test-only value. */
+    static final String TEST_PASSWORD = "test-only-Passw0rd!";
+
+    /** All reference airport codes (BOM, DEL, BLR, ... BBI). */
+    static String[] allAirportCodes() {
+        return ReferenceAirports.ALL.stream().map(ReferenceAirports.ReferenceAirport::iataCode).toArray(String[]::new);
+    }
+
+    /** A user assigned to the given (existing) airports, password {@link #TEST_PASSWORD}. */
+    AppUser user(String username, UserRole role, boolean enabled, String... airportCodes) {
+        Set<Airport> airports = new LinkedHashSet<>();
+        for (String code : airportCodes) {
+            airports.add(airportRepository.findByIataCode(code)
+                    .orElseThrow(() -> new IllegalStateException("Test airport " + code + " missing")));
+        }
+        return appUserRepository.saveAndFlush(AppUser.builder()
+                .username(username)
+                .displayName(username + " (test)")
+                .passwordHash(passwordEncoder.encode(TEST_PASSWORD))
+                .role(role)
+                .enabled(enabled)
+                .airports(airports)
+                .build());
+    }
+
+    /** {@code Authorization} header value with a valid token for the user. */
+    String bearer(AppUser user) {
+        AirportScope scope = AirportScope.of(user.getAirports().stream().map(Airport::getIataCode).toList());
+        return "Bearer " + jwtUtil.issue(new AuthenticatedUser(user.getUserId(), user.getUsername(),
+                user.getDisplayName(), user.getRole(), scope)).token();
+    }
 
     /**
      * BOM -AI101-> BLR -AI202-> DEL with a passenger connection AI101 -> AI202,

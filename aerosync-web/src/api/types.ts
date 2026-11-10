@@ -210,10 +210,110 @@ export interface AirportOperations {
   gates: GateInfo[];
 }
 
-/** Error body returned by the operational network endpoints. */
+/** Error body returned by the backend: {"error": "...", "status": 403, "code": "forbidden"}. */
 export interface ApiErrorBody {
   error?: string;
   status?: number;
+  /** Machine-readable reason on auth errors: authentication_required, token_expired, token_invalid, account_inactive, invalid_credentials, too_many_attempts, forbidden. */
+  code?: string;
+}
+
+// ── Stage 3: authentication (AuthController) ──────────────────────────────
+
+export type UserRole = 'OPERATIONS_CONTROLLER' | 'OPERATIONS_VIEWER';
+
+/** GET /api/auth/me and the user part of the login response. */
+export interface UserProfile {
+  user_id: string;
+  username: string;
+  display_name: string;
+  role: UserRole;
+  /** False for read-only roles: resolution and disruption actions are refused by the backend. */
+  can_operate: boolean;
+  /** The airports this user is authorized for (never empty for a signed-in user). */
+  airports: AirportSummary[];
+}
+
+/** POST /api/auth/login response. */
+export interface LoginResponse {
+  token: string;
+  token_type: 'Bearer';
+  expires_at: string;
+  user: UserProfile;
+}
+
+// ── Stage 3: legacy operations endpoints used by the disruptions panel ─────
+
+export type DisruptionType = 'WEATHER_DELAY' | 'CREW_TIMEOUT' | 'AIRCRAFT_FAULT' | 'GATE_CONFLICT' | 'CASCADING_DELAY';
+export type DisruptionStatus = 'DETECTED' | 'RESOLVING' | 'RESOLVED' | 'FAILED' | 'PROPOSED';
+
+export const DISRUPTION_TYPES: DisruptionType[] = [
+  'WEATHER_DELAY',
+  'CREW_TIMEOUT',
+  'AIRCRAFT_FAULT',
+  'GATE_CONFLICT',
+  'CASCADING_DELAY',
+];
+
+/** GET /api/disruptions (com.aerosync.model.Disruption). */
+export interface Disruption {
+  id: number;
+  flight_id: string;
+  type: DisruptionType;
+  status: DisruptionStatus;
+  description: string | null;
+  delay_minutes: number | null;
+  passengers_affected: number | null;
+  cost_impact: number | null;
+  detected_at: string | null;
+  resolved_at: string | null;
+}
+
+/** GET /api/flights (com.aerosync.model.Flight, the legacy operations flight). */
+export interface OperationsFlight {
+  id: number;
+  flight_id: string;
+  origin: string;
+  destination: string;
+  aircraft_type: string | null;
+  scheduled_departure: string | null;
+  status: string;
+  assigned_gate: string | null;
+  assigned_crew_id: string | null;
+  risk_level: string | null;
+}
+
+/** One decision of a proposal (gate, crew, passengers, aircraft). */
+export interface ResolutionSection {
+  action?: string;
+  reason?: string;
+  [key: string]: unknown;
+}
+
+/** POST /api/agents/propose/{id} response; sent back unchanged to approve. */
+export interface ResolutionProposal {
+  disruption_id?: number;
+  flight_id?: string;
+  severity?: string;
+  estimated_new_delay_mins?: number;
+  actions_proposed?: string[];
+  ai_explanation?: string;
+  requires_approval?: boolean;
+  gate_resolution?: ResolutionSection;
+  crew_resolution?: ResolutionSection;
+  passenger_resolution?: ResolutionSection;
+  aircraft_resolution?: ResolutionSection;
+  [key: string]: unknown;
+}
+
+/** POST /api/agents/approve/{id} response. */
+export interface ResolutionResult extends ResolutionProposal {
+  status?: string;
+  cascade_result?: {
+    flights_cascaded?: number;
+    cascade_scope_note?: string;
+    [key: string]: unknown;
+  };
 }
 
 export function isAirportNode(node: GraphNode): node is AirportNode {

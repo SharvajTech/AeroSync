@@ -39,7 +39,7 @@ export function Sidebar({ active, status }: { active: RouteName; status: Backend
           </a>
         ))}
       </nav>
-      <div className="sidebar__footer" title="Checks GET /api/airports every 30 s">
+      <div className="sidebar__footer" title="Checks GET /api/health every 30 s">
         <span className={`status-dot status-dot--${status}`} aria-hidden />
         <span className="sidebar__status" data-testid="backend-status">{STATUS_TEXT[status]}</span>
       </div>

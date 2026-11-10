@@ -84,13 +84,17 @@ later step.
 
 ## API
 
-All endpoints are read-only `GET`s. Like `/api/flights`, they are public for
-the dashboard; the JWT filter only exempts `GET`/`HEAD`/`OPTIONS` on these
-prefixes, so future write endpoints under them will require a token.
+All endpoints are read-only `GET`s. Since Stage 3 they need a bearer token and
+only return the signed-in user's airports: the network contains the user's
+airports, their flights and the other endpoint airport of each flight;
+dependencies and traversals only include flights the user can see; other
+airports and their flights answer 403 (see [SECURITY.md](SECURITY.md)).
+`GET /api/graph/network` also takes `airports=BOM,DEL` to narrow the view to
+some of the user's airports.
 
 | Endpoint | Parameters |
 |---|---|
-| `GET /api/graph/network` | `date` (yyyy-MM-dd, default today in `aerosync.operations.timezone`), `include_dependencies` (default `true`) |
+| `GET /api/graph/network` | `date` (yyyy-MM-dd, default today in `aerosync.operations.timezone`), `include_dependencies` (default `true`), `airports` (optional, comma separated, must be the user's airports) |
 | `GET /api/graph/airports/{iata}` | `date` (local day at the airport), `include_dependencies` |
 | `GET /api/graph/flights/{flightId}` | `flightId` = instance UUID or `flight:<uuid>`; `depth` 1-5 (default 1) |
 | `GET /api/graph/flights/{flightId}/affected` | `max_depth` 1-20 (6), `horizon_hours` 1-168 (24, `0` = none), `types` (comma separated), `min_impact_weight` (0), `max_flights` 1-2000 (500) |
@@ -288,7 +292,9 @@ then restart the backend.
 * `com.aerosync.network.*IntegrationTest`: Spring Boot + H2 (PostgreSQL mode,
   profile `test`) for repositories, constraints, validation, graph queries,
   HTTP contract and the seeder.
-* `com.aerosync.security.JwtFilterGraphAccessTest`: public read-only paths.
+* `com.aerosync.security.JwtFilterGraphAccessTest`: token checks in front of the
+  graph endpoints; `com.aerosync.network.AirportScopedAccessIntegrationTest`:
+  airport scope over HTTP (see [SECURITY.md](SECURITY.md)).
 * `aerosync-ml/tests/test_gnn_compatibility.py`: the saved GNN still reproduces
   its recorded test ROC-AUC, its airport encoding is unchanged, and every GNN
   airport and route exists in the operational network.

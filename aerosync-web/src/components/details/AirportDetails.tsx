@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react';
 import { LuChartColumn, LuNetwork, LuTowerControl } from 'react-icons/lu';
 import { api, keys } from '../../api/endpoints';
 import type { AirportStatus, FlightMovement, GraphResponse } from '../../api/types';
-import { airportMovements, dependencyCounts } from '../../graph/model';
+import { airportMovements, airportNodes, dependencyCounts } from '../../graph/model';
 import { useResource } from '../../hooks/useResource';
+import { useAirport } from '../../state/AirportContext';
 import type { Selection } from '../../state/selection';
 import {
   airportStatusTone,
@@ -36,7 +37,13 @@ export interface AirportDetailsProps {
 
 export function AirportDetails({ iata, date, context, onSelect, onViewAirportGraph, onOpenOperations }: AirportDetailsProps) {
   const [tab, setTab] = useState<Tab>('overview');
-  const operations = useResource(keys.airportOperations(iata, date), () => api.airportOperations(iata, date));
+  const { isAuthorized, airport: home } = useAirport();
+  // Endpoint airports outside the user's assignment appear in the graph (as the
+  // other end of a visible flight) but their operations are not requested.
+  const authorized = isAuthorized(iata);
+  const operations = useResource(authorized ? keys.airportOperations(iata, date) : null, () =>
+    api.airportOperations(iata, date),
+  );
   const ops = operations.data;
 
   const contextFlights = useMemo(() => {
@@ -51,8 +58,64 @@ export function AirportDetails({ iata, date, context, onSelect, onViewAirportGra
     .map((t) => `${dependencies[t]} ${dependencyShortLabel(t).toLowerCase()}${dependencies[t] === 1 ? '' : 's'}`)
     .join(' · ');
 
-  const airport = ops?.airport;
+  const airport = ops?.airport ?? airportNodes(context).find((a) => a.iata_code === iata);
   const status: AirportStatus | undefined = airport?.status;
+
+  const connectedSection = (
+    <section className="details__section">
+      <h3 className="details__label">Connected flights {context ? `(${contextFlights.length})` : ''}</h3>
+      {contextFlights.length === 0 ? (
+        <p className="details__muted">No flights at {iata} in the current graph view.</p>
+      ) : (
+        <div className="chip-list">
+          {contextFlights.slice(0, MAX_CHIPS).map((flight) => (
+            <button
+              key={flight.id}
+              type="button"
+              className="chip"
+              title={`${flight.origin_airport} → ${flight.destination_airport} · ${localClock(flight.scheduled_departure_local)}`}
+              onClick={() => onSelect({ kind: 'flight', flightId: flight.flight_instance_id })}
+            >
+              {flight.flight_number}
+            </button>
+          ))}
+          {contextFlights.length > MAX_CHIPS && (
+            <span className="chip chip--muted">+{contextFlights.length - MAX_CHIPS} more</span>
+          )}
+        </div>
+      )}
+    </section>
+  );
+  const dependencySection = (
+    <section className="details__section">
+      <h3 className="details__label">Dependencies</h3>
+      <p className="details__value">{dependencyText || 'None among these flights'}</p>
+    </section>
+  );
+
+  if (!authorized) {
+    return (
+      <div className="details" data-testid="airport-details">
+        <div className="details__head">
+          <div className="details__icon" aria-hidden><LuTowerControl /></div>
+          <div className="details__identity">
+            <div className="details__code">{iata}</div>
+            <div className="details__name">{airport ? airport.city : ' '}</div>
+          </div>
+          {status && <StatusBadge tone={airportStatusTone(status)}>{titleCase(status)}</StatusBadge>}
+        </div>
+        {airport && <div className="details__subtitle">{airport.airport_name}</div>}
+        <div className="details__sections">
+          <p className="notice notice--info" data-testid="outside-scope">
+            {iata} is outside your authorized airports. Only its flights to and from {home.iata_code} are shown;
+            its operations board and airport graph are not available to you.
+          </p>
+          {connectedSection}
+          {dependencySection}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="details" data-testid="airport-details">
@@ -95,34 +158,8 @@ export function AirportDetails({ iata, date, context, onSelect, onViewAirportGra
             )}
           </section>
 
-          <section className="details__section">
-            <h3 className="details__label">Connected flights {context ? `(${contextFlights.length})` : ''}</h3>
-            {contextFlights.length === 0 ? (
-              <p className="details__muted">No flights at {iata} in the current graph view.</p>
-            ) : (
-              <div className="chip-list">
-                {contextFlights.slice(0, MAX_CHIPS).map((flight) => (
-                  <button
-                    key={flight.id}
-                    type="button"
-                    className="chip"
-                    title={`${flight.origin_airport} → ${flight.destination_airport} · ${localClock(flight.scheduled_departure_local)}`}
-                    onClick={() => onSelect({ kind: 'flight', flightId: flight.flight_instance_id })}
-                  >
-                    {flight.flight_number}
-                  </button>
-                ))}
-                {contextFlights.length > MAX_CHIPS && (
-                  <span className="chip chip--muted">+{contextFlights.length - MAX_CHIPS} more</span>
-                )}
-              </div>
-            )}
-          </section>
-
-          <section className="details__section">
-            <h3 className="details__label">Dependencies</h3>
-            <p className="details__value">{dependencyText || 'None among these flights'}</p>
-          </section>
+          {connectedSection}
+          {dependencySection}
 
           {ops.gates.length > 0 && (
             <section className="details__section">

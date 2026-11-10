@@ -1,8 +1,24 @@
 import { RequestCache } from './cache';
-import { getJson } from './client';
-import type { AirportOperations, AirportSummary, DependencyType, GraphResponse } from './types';
+import { getJson, postJson } from './client';
+import type {
+  AirportOperations,
+  AirportSummary,
+  DependencyType,
+  Disruption,
+  DisruptionType,
+  GraphResponse,
+  LoginResponse,
+  OperationsFlight,
+  ResolutionProposal,
+  ResolutionResult,
+  UserProfile,
+} from './types';
 
-/** One shared cache for all views: switching pages or panels never refetches fresh data. */
+/**
+ * One shared cache for all views: switching pages or panels never refetches
+ * fresh data. Keys include the airport, and the whole cache is cleared on
+ * sign-out, so data of one user or airport is never shown for another.
+ */
 export const apiCache = new RequestCache(60_000);
 
 export interface AffectedOptions {
@@ -14,27 +30,47 @@ export interface AffectedOptions {
 }
 
 export const keys = {
-  network: (date: string | null) => `network:${date ?? 'default'}`,
+  network: (airport: string, date: string | null) => `network:${airport}:${date ?? 'default'}`,
   airports: () => 'airports',
   airportGraph: (iata: string, date: string | null) => `airport-graph:${iata}:${date ?? 'default'}`,
   airportOperations: (iata: string, date: string | null) => `airport-ops:${iata}:${date ?? 'default'}`,
   flightGraph: (flightId: string, depth: number) => `flight-graph:${flightId}:${depth}`,
   affected: (flightId: string, o: AffectedOptions) =>
     `affected:${flightId}:${o.maxDepth ?? ''}:${o.horizonHours ?? ''}:${(o.types ?? []).join(',')}:${o.minImpactWeight ?? ''}:${o.maxFlights ?? ''}`,
+  disruptions: (airport: string) => `disruptions:${airport}`,
+  operationsFlights: (airport: string) => `ops-flights:${airport}`,
 };
 
-/** Typed access to the Stage 1 endpoints (GraphController and AirportOperationsController). */
+/** Typed access to the backend. Every call except login sends the session token. */
 export const api = {
-  /** GET /api/graph/network?date= — without a date the backend uses "today" in its operations time zone. */
-  network(date: string | null): Promise<GraphResponse> {
-    return apiCache.get(keys.network(date), async () => {
-      const response = await getJson<GraphResponse>('/api/graph/network', { date, include_dependencies: true });
-      if (!date && response.service_date) apiCache.put(keys.network(response.service_date), response);
+  /** POST /api/auth/login (public). */
+  login(username: string, password: string): Promise<LoginResponse> {
+    return postJson<LoginResponse>('/api/auth/login', { username, password }, {}, { auth: false });
+  },
+
+  /** GET /api/auth/me — the signed-in user and their authorized airports. */
+  me(): Promise<UserProfile> {
+    return getJson<UserProfile>('/api/auth/me');
+  },
+
+  /**
+   * GET /api/graph/network?date=&airports= — flights departing from or
+   * arriving at the airport (the backend refuses airports outside the user's
+   * assignment). Without a date the backend uses "today".
+   */
+  network(date: string | null, airport: string): Promise<GraphResponse> {
+    return apiCache.get(keys.network(airport, date), async () => {
+      const response = await getJson<GraphResponse>('/api/graph/network', {
+        date,
+        include_dependencies: true,
+        airports: airport,
+      });
+      if (!date && response.service_date) apiCache.put(keys.network(airport, response.service_date), response);
       return response;
     });
   },
 
-  /** GET /api/airports */
+  /** GET /api/airports — the airports of the signed-in user. */
   airports(): Promise<AirportSummary[]> {
     return apiCache.get(keys.airports(), () => getJson<AirportSummary[]>('/api/airports'));
   },
@@ -71,5 +107,37 @@ export const api = {
         max_flights: options.maxFlights,
       }),
     );
+  },
+
+  // ── Disruptions and resolutions (legacy operations endpoints) ───────────
+
+  /** GET /api/disruptions?airport= — disruptions of flights departing from or arriving at the airport. */
+  disruptions(airport: string): Promise<Disruption[]> {
+    return apiCache.get(keys.disruptions(airport), () => getJson<Disruption[]>('/api/disruptions', { airport }));
+  },
+
+  /** GET /api/flights?airport= — operations flights of the airport (for reporting a disruption). */
+  operationsFlights(airport: string): Promise<OperationsFlight[]> {
+    return apiCache.get(keys.operationsFlights(airport), () => getJson<OperationsFlight[]>('/api/flights', { airport }));
+  },
+
+  /** POST /api/disruptions/trigger — needs an operator role at the flight's departure airport. */
+  reportDisruption(flightId: string, type: DisruptionType, delayMinutes: number): Promise<Disruption> {
+    return postJson<Disruption>('/api/disruptions/trigger', undefined, { flightId, type, delayMinutes });
+  },
+
+  /** POST /api/agents/propose/{id} — recommendation only, nothing is changed until approved. */
+  proposeResolution(disruptionId: number): Promise<ResolutionProposal> {
+    return postJson<ResolutionProposal>(`/api/agents/propose/${disruptionId}`);
+  },
+
+  /** POST /api/agents/approve/{id} — applies the approved proposal. */
+  approveResolution(disruptionId: number, proposal: ResolutionProposal): Promise<ResolutionResult> {
+    return postJson<ResolutionResult>(`/api/agents/approve/${disruptionId}`, proposal);
+  },
+
+  /** POST /api/agents/reject/{id} — the agent proposes again without the rejected resource. */
+  rejectResolution(disruptionId: number, reason: string): Promise<ResolutionProposal> {
+    return postJson<ResolutionProposal>(`/api/agents/reject/${disruptionId}`, { reason });
   },
 };

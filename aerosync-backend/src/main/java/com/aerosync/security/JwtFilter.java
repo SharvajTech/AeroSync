@@ -4,93 +4,137 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
-import java.io.IOException;
-import java.util.List;
 
-@Slf4j
+import java.io.IOException;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * Single authentication entry point of the backend.
+ *
+ * <p>Every request needs {@code Authorization: Bearer <token>} except the
+ * login endpoint, the health endpoint and CORS preflight ({@code OPTIONS})
+ * requests. Paths that do not exist (for example {@code /}) are therefore
+ * answered with 401 before Spring would answer 404, so nothing about the
+ * route layout is revealed to anonymous callers.</p>
+ *
+ * <p>For a valid token the user is loaded from the database
+ * ({@link PrincipalLookup}) and stored as {@link AuthenticatedUser} in the
+ * request. Authorization (airport scope, role) is enforced by the services,
+ * not here.</p>
+ */
 @Component
-@RequiredArgsConstructor
 public class JwtFilter extends OncePerRequestFilter {
 
+    private static final Logger log = LoggerFactory.getLogger(JwtFilter.class);
+
+    /** Exact paths that never need a token. */
+    static final Set<String> PUBLIC_PATHS = Set.of("/api/auth/login", "/api/health");
+
     private final JwtUtil jwtUtil;
+    private final PrincipalLookup principals;
 
-    // Public endpoints that don't need JWT
-    private static final List<String> PUBLIC_PATHS = List.of(
-        "/api/auth/login",
-        "/api/auth/airports",
-        "/api/health",
-        "/actuator",
-        "/api/flights",
-        "/api/disruptions",
-        "/api/agents",
-        "/api/resolutions",
-        "/api/crew",
-        "/api/gates"
-    );
-
-    // Read-only operational network endpoints (graph + airport operations)
-    // used by the dashboard. Only GET/HEAD/OPTIONS are public, so any write
-    // endpoint added under these prefixes later still requires a token.
-    private static final List<String> PUBLIC_READ_ONLY_PREFIXES = List.of(
-        "/api/graph",
-        "/api/airports"
-    );
-
-    @Override
-    protected void doFilterInternal(
-            HttpServletRequest  request,
-            HttpServletResponse response,
-            FilterChain         filterChain)
-            throws ServletException, IOException {
-
-        String path = request.getRequestURI();
-
-        // Skip JWT for public endpoints
-        if (PUBLIC_PATHS.stream().anyMatch(path::startsWith)
-                || isPublicReadOnly(request.getMethod(), path)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        String authHeader = request.getHeader("Authorization");
-
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            response.getWriter().write(
-                    "{\"error\":\"Missing or invalid Authorization header\"}"
-            );
-            return;
-        }
-
-        String token = authHeader.substring(7);
-
-        if (!jwtUtil.isTokenValid(token)) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            response.getWriter().write(
-                    "{\"error\":\"Invalid or expired token\"}"
-            );
-            return;
-        }
-
-        // Set airport context in request
-        String airport = jwtUtil.extractAirport(token);
-        String role    = jwtUtil.extractRole(token);
-        request.setAttribute("airport", airport);
-        request.setAttribute("role",    role);
-
-        log.debug("JWT valid — airport: {} role: {}", airport, role);
-        filterChain.doFilter(request, response);
+    public JwtFilter(JwtUtil jwtUtil, PrincipalLookup principals) {
+        this.jwtUtil = jwtUtil;
+        this.principals = principals;
     }
 
-    static boolean isPublicReadOnly(String method, String path) {
-        boolean safeMethod = "GET".equalsIgnoreCase(method)
-                || "HEAD".equalsIgnoreCase(method)
-                || "OPTIONS".equalsIgnoreCase(method);
-        return safeMethod && PUBLIC_READ_ONLY_PREFIXES.stream()
-                .anyMatch(prefix -> path.equals(prefix) || path.startsWith(prefix + "/"));
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws ServletException, IOException {
+
+        if (isPublic(request.getMethod(), pathWithinApplication(request))) {
+            chain.doFilter(request, response);
+            return;
+        }
+
+        String token = bearerToken(request.getHeader("Authorization"));
+        if (token == null) {
+            unauthorized(response, "authentication_required",
+                    "Authentication required: sign in and send 'Authorization: Bearer <token>'");
+            return;
+        }
+
+        TokenClaims claims;
+        try {
+            claims = jwtUtil.verify(token);
+        } catch (InvalidTokenException ex) {
+            boolean expired = ex.reason() == InvalidTokenException.Reason.EXPIRED;
+            unauthorized(response, expired ? "token_expired" : "token_invalid", ex.getMessage());
+            return;
+        }
+
+        Optional<AuthenticatedUser> principal = principals.findActivePrincipal(claims.userId());
+        if (principal.isEmpty()) {
+            log.info("Rejected token of disabled or deleted user {}", claims.userId());
+            unauthorized(response, "account_inactive", "Your account is disabled or no longer exists");
+            return;
+        }
+
+        request.setAttribute(AuthenticatedUser.REQUEST_ATTRIBUTE, principal.get());
+        chain.doFilter(request, response);
+    }
+
+    static boolean isPublic(String method, String path) {
+        // Browsers send CORS preflight requests without credentials; they never reach a handler's logic.
+        if ("OPTIONS".equalsIgnoreCase(method)) {
+            return true;
+        }
+        return PUBLIC_PATHS.contains(path);
+    }
+
+    /** The token of a {@code Bearer} Authorization header, or null when absent or not a bearer token. */
+    static String bearerToken(String header) {
+        if (header == null || header.length() <= 7 || !header.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            return null;
+        }
+        String token = header.substring(7).trim();
+        return token.isEmpty() ? null : token;
+    }
+
+    private static String pathWithinApplication(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (contextPath != null && !contextPath.isEmpty() && uri.startsWith(contextPath)) {
+            return uri.substring(contextPath.length());
+        }
+        return uri;
+    }
+
+    private static void unauthorized(HttpServletResponse response, String code, String message) throws IOException {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setHeader("WWW-Authenticate", "authentication_required".equals(code)
+                ? "Bearer realm=\"aerosync\""
+                : "Bearer realm=\"aerosync\", error=\"invalid_token\"");
+        response.setHeader("Cache-Control", "no-store");
+        response.setContentType("application/json");
+        response.setCharacterEncoding("UTF-8");
+        response.getWriter().write("{\"error\":\"" + jsonEscape(message) + "\",\"status\":401,\"code\":\""
+                + code + "\"}");
+    }
+
+    static String jsonEscape(String value) {
+        StringBuilder out = new StringBuilder(value.length() + 8);
+        for (char c : value.toCharArray()) {
+            switch (c) {
+                case '"' -> out.append("\\\"");
+                case '\\' -> out.append("\\\\");
+                case '\n' -> out.append("\\n");
+                case '\r' -> out.append("\\r");
+                case '\t' -> out.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        out.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        out.append(c);
+                    }
+                }
+            }
+        }
+        return out.toString();
     }
 }

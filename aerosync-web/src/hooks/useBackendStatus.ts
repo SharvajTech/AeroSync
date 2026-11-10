@@ -4,8 +4,8 @@ import { getJson } from '../api/client';
 export type BackendStatus = 'checking' | 'online' | 'offline';
 
 /**
- * Checks that the backend answers (GET /api/airports, small and public) on
- * mount and every `intervalMs`. Drives the "System online" indicator.
+ * Checks that the backend answers (GET /api/health, public) on mount and
+ * every `intervalMs`. Drives the "System online" indicator.
  */
 export function useBackendStatus(intervalMs = 30_000): BackendStatus {
   const [status, setStatus] = useState<BackendStatus>('checking');
@@ -13,7 +13,7 @@ export function useBackendStatus(intervalMs = 30_000): BackendStatus {
   useEffect(() => {
     let active = true;
     const check = () =>
-      getJson<unknown>('/api/airports', {}, { timeoutMs: 5_000 }).then(
+      getJson<unknown>('/api/health', {}, { timeoutMs: 5_000, auth: false }).then(
         () => active && setStatus('online'),
         () => active && setStatus('offline'),
       );

@@ -1,22 +1,53 @@
 package com.aerosync.service;
 
+import com.aerosync.exception.AccessForbiddenException;
 import com.aerosync.model.Flight;
 import com.aerosync.repository.FlightRepository;
+import com.aerosync.security.AirportScope;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ScheduleGeneratorService {
 
+    /** Departure airports of the generated schedule. */
+    public static final Set<String> ORIGIN_AIRPORTS = Set.of("BOM", "DEL", "BLR", "HYD");
+
     private final FlightRepository flightRepository;
     private final WeatherService   weatherService;
+
+    /**
+     * Regenerates the schedule for a user. The generator deletes every legacy
+     * flight and creates new ones departing from {@link #ORIGIN_AIRPORTS}, so
+     * the user must be authorized for all of those and for every departure
+     * airport that currently has flights (Stage 3).
+     */
+    public void generateDailySchedule(AirportScope scope) {
+        if (!scope.isUnrestricted()) {
+            Set<String> affected = new TreeSet<>(ORIGIN_AIRPORTS);
+            for (String origin : flightRepository.findDistinctOrigins()) {
+                affected.add(origin.trim().toUpperCase(Locale.ROOT));
+            }
+            List<String> missing = affected.stream().filter(code -> !scope.includes(code)).toList();
+            if (!missing.isEmpty()) {
+                throw new AccessForbiddenException("Regenerating the schedule replaces the flights of "
+                        + missing.size() + " airport(s) you are not authorized for; it needs access to every "
+                        + "departure airport (" + String.join(", ", ORIGIN_AIRPORTS.stream().sorted().toList())
+                        + " and any other airport with flights)");
+            }
+        }
+        generateDailySchedule();
+    }
 
     public void generateDailySchedule() {
         flightRepository.deleteAll();

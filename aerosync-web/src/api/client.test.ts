@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ApiError, buildUrl, describeError, getJson } from './client';
+import { ApiError, buildUrl, configureAuth, describeError, getJson, postJson } from './client';
 
 function respond(status: number, body: string, contentType = 'application/json'): typeof fetch {
   return (async () => new Response(body, { status, headers: { 'Content-Type': contentType } })) as typeof fetch;
@@ -84,5 +84,97 @@ describe('getJson', () => {
 describe('describeError', () => {
   it('describes unknown errors generically', () => {
     expect(describeError(new Error('boom'))).toEqual({ title: 'Something went wrong', detail: 'boom' });
+  });
+});
+
+describe('authenticated requests', () => {
+  function capture(status = 200, body = '{}') {
+    const seen: { url: string; init: RequestInit | undefined }[] = [];
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      seen.push({ url, init });
+      return new Response(body, { status, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+    return { seen, fetchImpl };
+  }
+
+  function headerOf(init: RequestInit | undefined, name: string): string | undefined {
+    return (init?.headers as Record<string, string> | undefined)?.[name];
+  }
+
+  it('sends the session token as a bearer header', async () => {
+    configureAuth({ token: () => 'session-token', onUnauthorized: () => undefined });
+    try {
+      const { seen, fetchImpl } = capture();
+      await getJson('/api/graph/network', { airports: 'BOM' }, { fetchImpl });
+      expect(headerOf(seen[0].init, 'Authorization')).toBe('Bearer session-token');
+      expect(seen[0].url).toContain('airports=BOM');
+    } finally {
+      configureAuth({ token: () => null, onUnauthorized: () => undefined });
+    }
+  });
+
+  it('sends no token for public calls and when signed out', async () => {
+    configureAuth({ token: () => 'session-token', onUnauthorized: () => undefined });
+    try {
+      const { seen, fetchImpl } = capture();
+      await postJson('/api/auth/login', { username: 'bom.ops', password: 'x' }, {}, { fetchImpl, auth: false });
+      expect(headerOf(seen[0].init, 'Authorization')).toBeUndefined();
+      expect(seen[0].init?.method).toBe('POST');
+      expect(seen[0].init?.body).toBe('{"username":"bom.ops","password":"x"}');
+      expect(headerOf(seen[0].init, 'Content-Type')).toBe('application/json');
+    } finally {
+      configureAuth({ token: () => null, onUnauthorized: () => undefined });
+    }
+    const { seen, fetchImpl } = capture();
+    await getJson('/api/flights', {}, { fetchImpl });
+    expect(headerOf(seen[0].init, 'Authorization')).toBeUndefined();
+  });
+
+  it('reports a 401 on a protected request to the session handler', async () => {
+    const reported: ApiError[] = [];
+    configureAuth({ token: () => 'expired-token', onUnauthorized: (error) => reported.push(error) });
+    try {
+      const { fetchImpl } = capture(401, '{"error":"Your session has expired; please sign in again","status":401,"code":"token_expired"}');
+      const error = await failure(getJson('/api/graph/network', {}, { fetchImpl }));
+      expect(error.kind).toBe('unauthorized');
+      expect(error.code).toBe('token_expired');
+      expect(reported).toHaveLength(1);
+      expect(describeError(error).title).toBe('Session expired');
+    } finally {
+      configureAuth({ token: () => null, onUnauthorized: () => undefined });
+    }
+  });
+
+  it('does not treat a failed login (401) as an expired session', async () => {
+    const reported: ApiError[] = [];
+    configureAuth({ token: () => null, onUnauthorized: (error) => reported.push(error) });
+    try {
+      const { fetchImpl } = capture(401, '{"error":"Invalid username or password","status":401,"code":"invalid_credentials"}');
+      const error = await failure(postJson('/api/auth/login', {}, {}, { fetchImpl, auth: false }));
+      expect(error.code).toBe('invalid_credentials');
+      expect(reported).toHaveLength(0);
+    } finally {
+      configureAuth({ token: () => null, onUnauthorized: () => undefined });
+    }
+  });
+
+  it('maps 403 to a "Not authorized" error without ending the session', async () => {
+    const reported: ApiError[] = [];
+    configureAuth({ token: () => 'token', onUnauthorized: (error) => reported.push(error) });
+    try {
+      const { fetchImpl } = capture(403, '{"error":"You are not authorized for airport DEL","status":403,"code":"forbidden"}');
+      const error = await failure(getJson('/api/graph/airports/DEL', {}, { fetchImpl }));
+      expect(error.kind).toBe('forbidden');
+      expect(describeError(error)).toEqual({ title: 'Not authorized', detail: 'You are not authorized for airport DEL' });
+      expect(reported).toHaveLength(0);
+    } finally {
+      configureAuth({ token: () => null, onUnauthorized: () => undefined });
+    }
+  });
+
+  it('maps 429 to rate_limited', async () => {
+    const { fetchImpl } = capture(429, '{"error":"Too many failed login attempts. Try again in 15 minute(s).","status":429}');
+    const error = await failure(postJson('/api/auth/login', {}, {}, { fetchImpl, auth: false }));
+    expect(error.kind).toBe('rate_limited');
   });
 });

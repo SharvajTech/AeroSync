@@ -64,7 +64,7 @@ Manual coordination between ops teams typically takes **20–40 minutes** and st
 | **Human-in-the-loop** | Propose → approve/reject workflow with feedback-driven re-reasoning |
 | **Operations data** | JPA entities for flights, gates, crew, disruptions; JSONB resolution storage |
 | **Schedule generation** | Daily flight schedule seeded with live weather scores on startup |
-| **Auth** | JWT-based login for API consumers |
+| **Auth** | Username/password login (BCrypt), JWT bearer tokens, airport-scoped access: users only see and change the airports assigned to them |
 
 ---
 
@@ -230,7 +230,7 @@ Example response from `POST /predict` includes `delay_probability`, `risk_level`
 
 ## API Reference
 
-### Backend (`http://localhost:8080`)
+### Backend (`http://localhost:8080` locally, `http://localhost:8082` under Docker Compose)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -247,20 +247,29 @@ Example response from `POST /predict` includes `delay_probability`, `risk_level`
 | `POST` | `/api/disruptions/simulate` | Random high-risk disruption |
 | `POST` | `/api/agents/resolve/{id}` | Auto-resolve disruption |
 | `POST` | `/api/agents/propose/{id}` | Propose resolution |
-| `POST` | `/api/auth/login` | JWT authentication |
-| `GET` | `/api/graph/network?date=` | Operational network graph: airports, flight instances, route edges, dependencies |
+| `POST` | `/api/auth/login` | Sign in (public); returns a bearer token and the user's airports |
+| `GET` | `/api/auth/me` | The signed-in user, role and authorized airports |
+| `GET` | `/api/health` | Liveness (public) |
+| `GET` | `/api/graph/network?date=&airports=` | Operational network graph of the user's airports: airports, flight instances, route edges, dependencies |
 | `GET` | `/api/graph/airports/{iata}?date=` | One airport with its departing/arriving flights and their dependencies |
 | `GET` | `/api/graph/flights/{flightId}?depth=` | A flight instance with upstream/downstream dependencies |
 | `GET` | `/api/graph/flights/{flightId}/affected` | Flights reachable downstream through dependencies |
 | `GET` | `/api/airports` / `/api/airports/{iata}/operations?date=` | Airports; departures, arrivals and gates of one airport |
 
-The operational network graph (Stage 1) is documented in
+Every endpoint except login and health needs `Authorization: Bearer <token>`
+and is limited to the signed-in user's airports (other airports: 403). See
+[`aerosync-backend/docs/SECURITY.md`](aerosync-backend/docs/SECURITY.md). The
+operational network graph (Stage 1) is documented in
 [`aerosync-backend/docs/OPERATIONAL_NETWORK.md`](aerosync-backend/docs/OPERATIONAL_NETWORK.md).
 
 **Trigger disruption example**
 
 ```bash
-curl -X POST "http://localhost:8080/api/disruptions/trigger?flightId=AI-101&type=WEATHER_DELAY&delayMinutes=120"
+API=http://localhost:8082   # Docker Compose; http://localhost:8080 for ./mvnw spring-boot:run
+TOKEN=$(curl -s -X POST $API/api/auth/login -H 'Content-Type: application/json' \
+  -d '{"username":"bom.ops","password":"<your demo password>"}' | jq -r .token)
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  "$API/api/disruptions/trigger?flightId=AI-101&type=WEATHER_DELAY&delayMinutes=120"
 ```
 
 ### ML service (`http://localhost:8000`)
@@ -330,18 +339,51 @@ npm run dev          # http://localhost:3000, proxies /api to http://localhost:8
 
 See [`aerosync-web/README.md`](aerosync-web/README.md) for configuration, tests and the Docker image.
 
-### 5. Quick smoke test
+### Or: everything with Docker Compose
 
 ```bash
-# ML health
+cp .env.example .env      # then fill in at least DB_PASSWORD and JWT_SECRET
+docker compose up --build
+```
+
+Web dashboard http://localhost:3000, backend http://localhost:8082. `.env` is
+ignored by git; keep real secrets only there.
+
+### 5. Sign in (demo accounts, development only)
+
+Set these in `.env` for Docker Compose (see [`.env.example`](.env.example)), or
+export them in the shell before `./mvnw spring-boot:run`, then restart the backend:
+
+```bash
+JWT_SECRET=...                       # output of: openssl rand -base64 48 (32+ characters)
+AEROSYNC_DEMO_USERS_ENABLED=true
+AEROSYNC_DEMO_PASSWORD=choose-a-local-password
+```
+
+This creates `bom.ops` (BOM), `del.ops` (DEL), `network.ops` (BOM, DEL, BLR, HYD)
+and the read-only `bom.viewer` (BOM), all with that password. Open
+http://localhost:3000 and sign in. Without these settings no account exists;
+see [`aerosync-backend/docs/SECURITY.md`](aerosync-backend/docs/SECURITY.md) for
+creating real users.
+
+### 6. Quick smoke test
+
+```bash
+API=http://localhost:8082   # Docker Compose; http://localhost:8080 for ./mvnw spring-boot:run
+
+# Backend health (public); ML health only when running locally (no host port under Docker)
+curl $API/api/health
 curl http://localhost:8000/health
 
-# List flights
-curl http://localhost:8080/api/flights
+# Everything else needs a token
+TOKEN=$(curl -s -X POST $API/api/auth/login -H 'Content-Type: application/json' \
+  -d '{"username":"bom.ops","password":"choose-a-local-password"}' | jq -r .token)
+curl -H "Authorization: Bearer $TOKEN" $API/api/flights               # BOM flights only
+curl -H "Authorization: Bearer $TOKEN" $API/api/graph/airports/DEL    # 403: not your airport
 
-# Simulate a disruption, then resolve (use returned disruption id)
-curl -X POST http://localhost:8080/api/disruptions/simulate
-curl -X POST http://localhost:8080/api/agents/resolve/1
+# Simulate a disruption at BOM, then resolve it (use the returned disruption id)
+curl -X POST -H "Authorization: Bearer $TOKEN" $API/api/disruptions/simulate
+curl -X POST -H "Authorization: Bearer $TOKEN" $API/api/agents/resolve/1
 ```
 
 ---
@@ -356,7 +398,9 @@ Configure via `application.properties` (backend) and environment variables (ML).
 | `ml.service.url` | Backend | ML service base URL |
 | `gemini.api.key` | Backend | Gemini explanation API |
 | `weather.api.key` | Backend | OpenWeatherMap for schedule weather |
-| `jwt.secret` | Backend | JWT signing secret |
+| `JWT_SECRET` (`jwt.secret`) | Backend | JWT signing secret, 32+ characters, from `.env` (no default) |
+| `JWT_EXPIRATION` | Backend | Token lifetime in ms (default 8 h) |
+| `AEROSYNC_DEMO_USERS_ENABLED`, `AEROSYNC_DEMO_PASSWORD`, `AEROSYNC_DEMO_USERS` | Backend | Development-only demo accounts |
 | `WEATHER_API_KEY` | ML | Live weather in `/predict` |
 
 ---
@@ -379,7 +423,8 @@ Configure via `application.properties` (backend) and environment variables (ML).
 - [ ] WebSocket live disruption feed
 - [ ] OpenSky Network integration for real flight telemetry (`data/opensky_fetcher.py`)
 - [ ] Unit and integration tests for rule engine and cascade logic
-- [ ] Docker Compose for one-command local deployment
+- [x] Docker Compose for one-command local deployment
+- [x] Sign-in and airport-scoped access (Stage 3)
 - [ ] CI pipeline with model artefact validation
 
 ---

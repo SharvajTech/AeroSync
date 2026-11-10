@@ -3,7 +3,10 @@ package com.aerosync.repository;
 import com.aerosync.model.Flight;
 import com.aerosync.model.Flight.FlightStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -15,4 +18,15 @@ public interface FlightRepository extends JpaRepository<Flight, Long> {
     List<Flight> findByOriginAndDestination(String origin, String destination);
     List<Flight> findByOriginAndStatus(
             String origin, Flight.FlightStatus status);
+
+    // ── Airport-scoped queries (Stage 3) ─────────────────────────────────────
+    /** Flights departing from or arriving at one of the airports. */
+    @Query("select f from Flight f where f.origin in :airports or f.destination in :airports")
+    List<Flight> findTouchingAirports(@Param("airports") Collection<String> airports);
+
+    /** Flights departing from one of the airports. */
+    List<Flight> findByOriginIn(Collection<String> origins);
+
+    @Query("select distinct f.origin from Flight f where f.origin is not null")
+    List<String> findDistinctOrigins();
 }

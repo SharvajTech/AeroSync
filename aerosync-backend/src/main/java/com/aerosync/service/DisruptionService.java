@@ -5,6 +5,7 @@ import com.aerosync.model.Disruption.*;
 import com.aerosync.model.Flight;
 import com.aerosync.repository.DisruptionRepository;
 import com.aerosync.repository.FlightRepository;
+import com.aerosync.security.AirportScope;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -27,6 +28,66 @@ public class DisruptionService {
     // Get active disruptions only
     public List<Disruption> getActiveDisruptions() {
         return disruptionRepository.findByStatus(DisruptionStatus.DETECTED);
+    }
+
+    // ── Airport-scoped access (Stage 3) ──────────────────────────────────────
+    // A disruption belongs to its flight: visible to the flight's origin and
+    // destination airports, actionable by its departure airport.
+
+    /** Disruptions of flights departing from or arriving at an airport in scope. */
+    public List<Disruption> getDisruptions(AirportScope scope) {
+        if (scope.isUnrestricted()) {
+            return getAllDisruptions();
+        }
+        List<String> flightIds = visibleFlightIds(scope);
+        return flightIds.isEmpty() ? List.of() : disruptionRepository.findByFlightIdIn(flightIds);
+    }
+
+    public List<Disruption> getActiveDisruptions(AirportScope scope) {
+        if (scope.isUnrestricted()) {
+            return getActiveDisruptions();
+        }
+        List<String> flightIds = visibleFlightIds(scope);
+        return flightIds.isEmpty() ? List.of()
+                : disruptionRepository.findByStatusAndFlightIdIn(DisruptionStatus.DETECTED, flightIds);
+    }
+
+    /** Trigger for a user: 403 unless the flight departs from an airport in scope. */
+    public Disruption triggerDisruption(String flightId, DisruptionType type, int delayMinutes, AirportScope scope) {
+        Flight flight = flightRepository.findByFlightId(flightId)
+                .orElseThrow(() ->
+                        new RuntimeException("Flight not found: " + flightId));
+        scope.requireOperate(flight.getOrigin(), "Flight " + flight.getFlightId());
+        return triggerDisruption(flightId, type, delayMinutes);
+    }
+
+    /** Random disruption on a flight departing from an airport in scope. */
+    public Disruption simulateRandom(AirportScope scope) {
+        if (scope.isUnrestricted()) {
+            return simulateRandom();
+        }
+        List<Flight> departing = scope.airports().isEmpty() ? List.of()
+                : flightRepository.findByOriginIn(scope.airports());
+        List<Flight> candidates = departing.stream().filter(f -> "HIGH".equals(f.getRiskLevel())).toList();
+        if (candidates.isEmpty()) {
+            candidates = departing.stream().filter(f -> f.getStatus() == Flight.FlightStatus.SCHEDULED).toList();
+        }
+        if (candidates.isEmpty()) {
+            throw new RuntimeException(
+                    "No flights departing from your airports are available for simulation.");
+        }
+        Flight target = candidates.get(new Random().nextInt(candidates.size()));
+        return triggerDisruption(target.getFlightId(), randomDisruptionType(target), 30 + new Random().nextInt(151));
+    }
+
+    private List<String> visibleFlightIds(AirportScope scope) {
+        if (scope.airports().isEmpty()) {
+            return List.of();
+        }
+        return flightRepository.findTouchingAirports(scope.airports()).stream()
+                .map(Flight::getFlightId)
+                .filter(Objects::nonNull)
+                .toList();
     }
 
     // Manually trigger a disruption for a specific flight

@@ -31,6 +31,20 @@ public interface FlightInstanceRepository extends JpaRepository<FlightInstance, 
             """)
     List<FlightInstance> findGraphFlightsByServiceDate(@Param("serviceDate") LocalDate serviceDate);
 
+    /** Flights of the service date departing from or arriving at one of the airports (airport-scoped network). */
+    @Query("""
+            select fi from FlightInstance fi
+            join fetch fi.schedule s
+            join fetch s.origin o
+            join fetch s.destination dest
+            left join fetch fi.aircraft
+            left join fetch fi.assignedGate
+            where s.serviceDate = :serviceDate
+              and (o.iataCode in :iataCodes or dest.iataCode in :iataCodes)
+            """)
+    List<FlightInstance> findGraphFlightsByServiceDateTouchingAirports(@Param("serviceDate") LocalDate serviceDate,
+                                                                      @Param("iataCodes") Collection<String> iataCodes);
+
     /** Departures from, and arrivals at, one airport within [windowStart, windowEnd). */
     @Query("""
             select fi from FlightInstance fi

@@ -8,6 +8,7 @@ import com.aerosync.model.Gate;
 import com.aerosync.repository.CrewRepository;
 import com.aerosync.repository.FlightRepository;
 import com.aerosync.repository.GateRepository;
+import com.aerosync.synthetic.ReferenceAirports;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -239,6 +240,11 @@ public class ResolutionAlgorithmService {
         for (Gate gate : available) {
 
             if (gate == null || gate.getGateNumber() == null) {
+                continue;
+            }
+
+            // Never propose a gate of another airport (Stage 3 airport scope)
+            if (!gateUsableFor(gate, flight)) {
                 continue;
             }
 
@@ -612,7 +618,8 @@ public class ResolutionAlgorithmService {
             // Validate the replacement BEFORE releasing the current gate.
             Gate targetGate = gates.stream()
                     .filter(g -> g != null
-                            && Objects.equals(g.getGateNumber(), newGate))
+                            && Objects.equals(g.getGateNumber(), newGate)
+                            && gateUsableFor(g, flight))
                     .findFirst()
                     .orElse(null);
 
@@ -629,7 +636,8 @@ public class ResolutionAlgorithmService {
                 gates.stream()
                         .filter(g -> g != null
                                 && Objects.equals(g.getGateNumber(),
-                                        flight.getAssignedGate()))
+                                        flight.getAssignedGate())
+                                && gateUsableFor(g, flight))
                         .findFirst()
                         .ifPresent(g -> {
                             g.setAvailable(true);
@@ -713,6 +721,27 @@ public class ResolutionAlgorithmService {
     // ============================================================
     // UTILITY METHODS
     // ============================================================
+
+    /**
+     * Stage 3 airport scope: a gate can serve a flight when it belongs to the
+     * flight's departure airport, or has no airport (the gates created before
+     * the operational network, a shared pool). Gates of other airports are
+     * never proposed, assigned or released for this flight.
+     */
+    static boolean gateUsableFor(Gate gate, Flight flight) {
+        if (gate == null) {
+            return false;
+        }
+        if (gate.getAirportId() == null) {
+            return true;
+        }
+        String origin = flight.getOrigin();
+        if (origin == null || !origin.trim().matches("[A-Za-z]{3}")) {
+            return false;
+        }
+        return gate.getAirportId().equals(
+                ReferenceAirports.airportUuid(origin.trim().toUpperCase(Locale.ROOT)));
+    }
 
     private boolean hasExactCsvValue(
             String csvValues,
@@ -888,41 +917,50 @@ public class ResolutionAlgorithmService {
             }
         }
 
-        boolean crewMarked = false;
-        boolean gateMarked = false;
+        // Resources temporarily marked unavailable, with their previous
+        // availability so exactly that state is restored afterwards.
+        Crew excludedCrew = null;
+        Boolean excludedCrewWasAvailable = null;
+        Gate excludedGateRecord = null;
+        Boolean excludedGateWasAvailable = null;
 
         try {
             if (excludeCrewId != null) {
 
                 final String id = excludeCrewId;
 
-                crewRepository.findAll().stream()
+                excludedCrew = crewRepository.findAll().stream()
                         .filter(c -> c != null
                                 && Objects.equals(c.getCrewId(), id))
                         .findFirst()
-                        .ifPresent(c -> {
-                            c.setAvailable(false);
-                            crewRepository.save(c);
-                        });
+                        .orElse(null);
 
-                crewMarked = true;
+                if (excludedCrew != null) {
+                    excludedCrewWasAvailable = excludedCrew.getAvailable();
+                    excludedCrew.setAvailable(false);
+                    crewRepository.save(excludedCrew);
+                }
             }
 
             if (excludeGate != null) {
 
                 final String gateNumber = excludeGate;
 
-                gateRepository.findAll().stream()
+                // Only gates this flight could use (its airport or the shared
+                // pool): free text must not toggle another airport's gate.
+                excludedGateRecord = gateRepository.findAll().stream()
                         .filter(g -> g != null
                                 && Objects.equals(
-                                g.getGateNumber(), gateNumber))
+                                g.getGateNumber(), gateNumber)
+                                && gateUsableFor(g, flight))
                         .findFirst()
-                        .ifPresent(g -> {
-                            g.setAvailable(false);
-                            gateRepository.save(g);
-                        });
+                        .orElse(null);
 
-                gateMarked = true;
+                if (excludedGateRecord != null) {
+                    excludedGateWasAvailable = excludedGateRecord.getAvailable();
+                    excludedGateRecord.setAvailable(false);
+                    gateRepository.save(excludedGateRecord);
+                }
             }
 
             Map<String, Object> revised =
@@ -937,35 +975,16 @@ public class ResolutionAlgorithmService {
 
         } finally {
 
-            // Restore temporarily excluded crew
-            if (crewMarked && excludeCrewId != null) {
-
-                final String id = excludeCrewId;
-
-                crewRepository.findAll().stream()
-                        .filter(c -> c != null
-                                && Objects.equals(c.getCrewId(), id))
-                        .findFirst()
-                        .ifPresent(c -> {
-                            c.setAvailable(true);
-                            crewRepository.save(c);
-                        });
+            // Restore the temporarily excluded crew to its previous state
+            if (excludedCrew != null) {
+                excludedCrew.setAvailable(excludedCrewWasAvailable);
+                crewRepository.save(excludedCrew);
             }
 
-            // Restore temporarily excluded gate
-            if (gateMarked && excludeGate != null) {
-
-                final String gateNumber = excludeGate;
-
-                gateRepository.findAll().stream()
-                        .filter(g -> g != null
-                                && Objects.equals(
-                                g.getGateNumber(), gateNumber))
-                        .findFirst()
-                        .ifPresent(g -> {
-                            g.setAvailable(true);
-                            gateRepository.save(g);
-                        });
+            // Restore the temporarily excluded gate to its previous state
+            if (excludedGateRecord != null) {
+                excludedGateRecord.setAvailable(excludedGateWasAvailable);
+                gateRepository.save(excludedGateRecord);
             }
         }
     }

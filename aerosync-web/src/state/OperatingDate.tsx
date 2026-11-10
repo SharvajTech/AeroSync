@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { api, keys } from '../api/endpoints';
 import type { DataWindow, GraphResponse } from '../api/types';
 import { useResource, type Resource } from '../hooks/useResource';
+import { useAirport } from './AirportContext';
 
 interface OperatingDateState {
   /** Selected service date (yyyy-MM-dd); null until the backend reports its "today". */
@@ -9,7 +10,7 @@ interface OperatingDateState {
   setDate: (date: string) => void;
   /** First and last service dates that have flights. */
   dataWindow: DataWindow | null;
-  /** National network for the selected date (shared by every page, fetched once per date). */
+  /** Network of the selected airport for the selected date (shared by every page, fetched once per airport and date). */
   network: Resource<GraphResponse>;
 }
 
@@ -17,7 +18,10 @@ const OperatingDateContext = createContext<OperatingDateState | null>(null);
 
 export function OperatingDateProvider({ children }: { children: ReactNode }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const network = useResource(keys.network(selected), () => api.network(selected));
+  const { airport } = useAirport();
+  const iata = airport.iata_code;
+  // Keyed by airport: switching airports loads that airport's network and never shows the previous one.
+  const network = useResource(keys.network(iata, selected), () => api.network(selected, iata));
 
   // Without an explicit date the backend answers for "today" in its
   // operations time zone; adopt that date (the response is cached under it).

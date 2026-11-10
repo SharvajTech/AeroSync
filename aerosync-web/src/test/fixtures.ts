@@ -3,7 +3,7 @@
  * code, so they cannot reach the production dashboard. The shapes mirror the
  * Stage 1 graph DTOs (snake_case, *_local timestamps carry the airport offset).
  */
-import type { AirportNode, DependencyType, FlightNode, FlightStatus, GraphEdge, GraphResponse } from '../api/types';
+import type { AirportNode, AirportSummary, DependencyType, FlightNode, FlightStatus, GraphEdge, GraphResponse, LoginResponse, UserProfile } from '../api/types';
 
 export function airport(iata: string, city: string, latitude: number, longitude: number, status: AirportNode['status'] = 'OPERATIONAL'): AirportNode {
   return {
@@ -149,4 +149,37 @@ export function affectedResponse(): GraphResponse {
       })),
     },
   };
+}
+
+// ── Stage 3: users and sessions (test data only) ────────────────────────────
+
+export function airportSummary(iata: string, city: string): AirportSummary {
+  const node = airport(iata, city, 0, 0);
+  return {
+    airport_id: `id-${iata}`,
+    node_id: node.id,
+    iata_code: iata,
+    airport_name: node.airport_name,
+    city,
+    timezone: 'Asia/Kolkata',
+    latitude: 0,
+    longitude: 0,
+    status: 'OPERATIONAL',
+  };
+}
+
+export function profile(username: string, airports: string[], role: UserProfile['role'] = 'OPERATIONS_CONTROLLER'): UserProfile {
+  const cities: Record<string, string> = { BOM: 'Mumbai', DEL: 'Delhi', BLR: 'Bengaluru' };
+  return {
+    user_id: `user-${username}`,
+    username,
+    display_name: `${username} (test)`,
+    role,
+    can_operate: role === 'OPERATIONS_CONTROLLER',
+    airports: airports.map((code) => airportSummary(code, cities[code] ?? code)),
+  };
+}
+
+export function loginResponse(username: string, airports: string[], expiresAt = '2099-01-01T00:00:00Z'): LoginResponse {
+  return { token: `token-of-${username}`, token_type: 'Bearer', expires_at: expiresAt, user: profile(username, airports) };
 }

@@ -52,10 +52,44 @@ st.set_page_config(page_title="AeroSync Ops Dashboard", page_icon="✈️", layo
 @st.cache_data(ttl=10)
 def backend_status():
     try:
-        r = requests.get(f"{BACKEND_URL}/api/flights", timeout=TIMEOUT)
-        return r.status_code in (200, 401, 403)
+        r = requests.get(f"{BACKEND_URL}/api/health", timeout=TIMEOUT)
+        return r.status_code == 200
     except Exception:
         return False
+
+
+# ── Backend authentication (Stage 3) ────────────────────────────────────────
+# The backend needs a bearer token for every operational endpoint and limits
+# each user to their assigned airports. The token lives only in this browser
+# session's Streamlit state; nothing is written to disk.
+def signed_in():
+    return bool(st.session_state.get("auth_token"))
+
+
+def sign_out(message=None):
+    for key in ("auth_token", "auth_user", "disruption_id", "proposal"):
+        st.session_state.pop(key, None)
+    if message:
+        st.session_state["auth_notice"] = message
+
+
+def backend(method, path, **kwargs):
+    """Calls the Spring Boot backend with the session token; a 401 signs out."""
+    headers = kwargs.pop("headers", {})
+    if signed_in():
+        headers["Authorization"] = f"Bearer {st.session_state['auth_token']}"
+    r = requests.request(method, f"{BACKEND_URL}{path}", headers=headers,
+                         timeout=kwargs.pop("timeout", TIMEOUT), **kwargs)
+    if r.status_code == 401:
+        sign_out("Session expired or invalid — please sign in again.")
+    if r.status_code in (401, 403):
+        try:
+            detail = r.json().get("error", r.text)
+        except ValueError:
+            detail = r.text
+        raise RuntimeError(f"{r.status_code}: {detail}")
+    r.raise_for_status()
+    return r
 
 
 @st.cache_data(ttl=10)
@@ -174,14 +208,48 @@ st.sidebar.markdown(f"{'🟢' if ml_main.RAG_AVAILABLE else '🟡'} RAG retrieva
 
 st.sidebar.markdown("---")
 
-if backend_up:
+st.sidebar.markdown("### Backend sign-in")
+if st.session_state.get("auth_notice"):
+    st.sidebar.warning(st.session_state.pop("auth_notice"))
+if signed_in():
+    user = st.session_state.get("auth_user", {})
+    airports = ", ".join(a.get("iata_code", "?") for a in user.get("airports", []))
+    st.sidebar.caption(f"Signed in as **{user.get('username', '?')}** · {airports}")
+    if st.sidebar.button("Sign out"):
+        sign_out("Signed out.")
+        st.rerun()
+elif backend_up:
+    with st.sidebar.form("login", clear_on_submit=False):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.form_submit_button("Sign in"):
+            try:
+                r = requests.post(f"{BACKEND_URL}/api/auth/login",
+                                  json={"username": username, "password": password}, timeout=TIMEOUT)
+                if r.status_code == 200:
+                    body = r.json()
+                    st.session_state["auth_token"] = body["token"]
+                    st.session_state["auth_user"] = body["user"]
+                    st.rerun()
+                else:
+                    st.error(r.json().get("error", f"Sign-in failed ({r.status_code})"))
+            except Exception as e:
+                st.error(f"Sign-in failed: {e}")
+st.sidebar.markdown("---")
+
+if backend_up and signed_in():
     try:
-        flights_resp = requests.get(f"{BACKEND_URL}/api/flights", timeout=TIMEOUT).json()
+        flights_resp = backend("GET", "/api/flights").json()
         flights_df = pd.DataFrame(flights_resp)
-        st.sidebar.success(f"{len(flights_df)} live flights loaded")
+        if flights_df.empty:
+            raise ValueError("no flights at your airports")
+        st.sidebar.success(f"{len(flights_df)} live flights at your airports")
     except Exception:
         flights_df = load_demo_flights()
         st.sidebar.warning("Backend reachable but /api/flights failed — using demo flights")
+elif backend_up:
+    flights_df = load_demo_flights()
+    st.sidebar.info("Sign in to load live flights of your airports — showing demo flights")
 else:
     flights_df = load_demo_flights()
     st.sidebar.info("Demo mode — 15 sample flights from the synthetic dataset")
@@ -293,14 +361,12 @@ if "proposal" not in st.session_state:
     st.session_state.proposal = None
 
 if simulate_clicked:
-    if backend_up:
+    if backend_up and signed_in():
         try:
-            r = requests.post(
-                f"{BACKEND_URL}/api/disruptions/trigger",
+            r = backend(
+                "POST", "/api/disruptions/trigger",
                 params={"flightId": selected_id, "type": disruption_type,
-                        "delayMinutes": int(delay_minutes)},
-                timeout=TIMEOUT)
-            r.raise_for_status()
+                        "delayMinutes": int(delay_minutes)})
             disruption = r.json()
             st.session_state.disruption_id = disruption["id"]
             st.session_state.proposal = None
@@ -389,13 +455,11 @@ else:
 # ── 6/7/8. Constraint engine (Decision), RAG (Evidence), LLM (Explanation) ──
 st.header("6-8 · Proposed Resolution — Decision / Evidence / Explanation")
 
-if backend_up and st.session_state.disruption_id and st.session_state.disruption_id != "DEMO":
+if backend_up and signed_in() and st.session_state.disruption_id and st.session_state.disruption_id != "DEMO":
     if st.button("📋 Propose resolution"):
         try:
-            r = requests.post(
-                f"{BACKEND_URL}/api/agents/propose/{st.session_state.disruption_id}",
-                timeout=15)
-            r.raise_for_status()
+            r = backend("POST", f"/api/agents/propose/{st.session_state.disruption_id}",
+                        timeout=15)
             st.session_state.proposal = r.json()
         except Exception as e:
             st.error(f"Propose failed: {e}")
@@ -428,10 +492,8 @@ if backend_up and st.session_state.disruption_id and st.session_state.disruption
         acol, rcol = st.columns(2)
         if acol.button("✅ Approve", type="primary", use_container_width=True):
             try:
-                r = requests.post(
-                    f"{BACKEND_URL}/api/agents/approve/{st.session_state.disruption_id}",
-                    json=proposal, timeout=15)
-                r.raise_for_status()
+                r = backend("POST", f"/api/agents/approve/{st.session_state.disruption_id}",
+                            json=proposal, timeout=15)
                 st.success("Resolution approved and applied.")
                 st.json(r.json(), expanded=False)
             except Exception as e:
@@ -442,18 +504,17 @@ if backend_up and st.session_state.disruption_id and st.session_state.disruption
                 st.warning("Enter a reason to reject.")
             else:
                 try:
-                    r = requests.post(
-                        f"{BACKEND_URL}/api/agents/reject/{st.session_state.disruption_id}",
-                        json={"reason": reason}, timeout=15)
-                    r.raise_for_status()
+                    r = backend("POST", f"/api/agents/reject/{st.session_state.disruption_id}",
+                                json={"reason": reason}, timeout=15)
                     st.session_state.proposal = r.json()
                     st.info("Agent re-reasoned excluding the rejected resource — see revised proposal above on next refresh.")
                 except Exception as e:
                     st.error(f"Reject failed: {e}")
 else:
-    st.warning("Decision / Approval require the live Spring Boot backend "
-               "(not reachable, or no disruption simulated yet). RAG evidence "
-               "can still be previewed below without it.")
+    st.warning("Decision / Approval require the live Spring Boot backend and a "
+               "signed-in user authorized for the flight's departure airport "
+               "(not reachable, not signed in, or no disruption simulated yet). "
+               "RAG evidence can still be previewed below without it.")
     st.subheader("Preview: RAG evidence for this disruption type")
     query = f"{disruption_type.replace('_', ' ').lower()} policy response"
     if ml_main.RAG_AVAILABLE:

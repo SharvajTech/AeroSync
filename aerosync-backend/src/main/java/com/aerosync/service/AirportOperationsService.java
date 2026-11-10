@@ -17,6 +17,7 @@ import com.aerosync.model.Gate;
 import com.aerosync.repository.AirportRepository;
 import com.aerosync.repository.FlightInstanceRepository;
 import com.aerosync.repository.GateRepository;
+import com.aerosync.security.AirportScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,10 +50,23 @@ public class AirportOperationsService {
     private final GateRepository gateRepository;
 
     public List<AirportDto> listAirports() {
-        return airportRepository.findAllByOrderByIataCodeAsc().stream().map(AirportOperationsService::toDto).toList();
+        return listAirports(AirportScope.unrestricted());
+    }
+
+    /** The airports in scope (Stage 3: a user only lists the airports assigned to them). */
+    public List<AirportDto> listAirports(AirportScope scope) {
+        return airportRepository.findAllByOrderByIataCodeAsc().stream()
+                .filter(airport -> scope.includes(airport.getIataCode()))
+                .map(AirportOperationsService::toDto)
+                .toList();
     }
 
     public AirportOperationsResponse getOperations(String iataCode, LocalDate serviceDate) {
+        return getOperations(iataCode, serviceDate, AirportScope.unrestricted());
+    }
+
+    /** Operations board of one airport; 404 for an unknown airport, 403 unless it is in scope. */
+    public AirportOperationsResponse getOperations(String iataCode, LocalDate serviceDate, AirportScope scope) {
         String iata;
         try {
             iata = NetworkIdentifiers.normalizeIata(iataCode);
@@ -61,6 +75,7 @@ public class AirportOperationsService {
         }
         Airport airport = airportRepository.findByIataCode(iata)
                 .orElseThrow(() -> new ResourceNotFoundException("Airport " + iata + " not found"));
+        scope.requireAirport(iata);
         ZoneId zone = ZoneId.of(airport.getTimezone());
         LocalDate day = serviceDate != null ? serviceDate : LocalDate.now(zone);
         Instant windowStart = day.atStartOfDay(zone).toInstant();

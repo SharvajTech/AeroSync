@@ -4,6 +4,7 @@ import { DEPENDENCY_TYPES, type DependencyType, type GraphResponse } from '../ap
 import { NetworkGraph } from '../graph/NetworkGraph';
 import { airportNodes, buildFlightGraph, buildRouteSummary, flightNodes, type VisualGraph } from '../graph/model';
 import type { Resource } from '../hooks/useResource';
+import { useAirport } from '../state/AirportContext';
 import { useOperatingDate } from '../state/OperatingDate';
 import {
   NETWORK_SCOPE,
@@ -38,11 +39,11 @@ function defaultWindow(date: string | null): TimeWindow {
   return date === now.date ? windowContaining(now.minutes) : DEFAULT_WINDOW;
 }
 
-function scopeTitle(scope: GraphScope, data: GraphResponse | undefined, date: string | null): string {
+function scopeTitle(scope: GraphScope, data: GraphResponse | undefined, date: string | null, home: string): string {
   const focusFlight = flightNodes(data).find((f) => f.id === data?.focus_node_id);
   switch (scope.kind) {
     case 'network':
-      return `National network · ${formatDateLong(date)}`;
+      return `${home} network · ${formatDateLong(date)}`;
     case 'airport':
       return `${scope.iata} airport · ${formatDateLong(date)}`;
     case 'flight':
@@ -54,6 +55,8 @@ function scopeTitle(scope: GraphScope, data: GraphResponse | undefined, date: st
 
 export function GraphPanel({ scope, onScopeChange, selection, onSelect, view: data, variant = 'dashboard' }: GraphPanelProps) {
   const { date, setDate, dataWindow } = useOperatingDate();
+  const { airport } = useAirport();
+  const home = airport.iata_code;
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(() => defaultWindow(date));
   const [types, setTypes] = useState<ReadonlySet<DependencyType>>(() => new Set(DEPENDENCY_TYPES));
   const [connected, setConnected] = useState(false);
@@ -126,7 +129,7 @@ export function GraphPanel({ scope, onScopeChange, selection, onSelect, view: da
         onSelect={(node) => onSelect(selectionFromNode(node))}
         fitKey={fitKey}
         dimOnSelect={!isScopeFocus(scope, selection)}
-        ariaLabel={`${scopeTitle(scope, data.data, date)}: ${graph.nodes.length} nodes, ${graph.edges.length} edges`}
+        ariaLabel={`${scopeTitle(scope, data.data, date, home)}: ${graph.nodes.length} nodes, ${graph.edges.length} edges`}
       />
     );
   }
@@ -134,18 +137,18 @@ export function GraphPanel({ scope, onScopeChange, selection, onSelect, view: da
   return (
     <Card
       className={`graph-card graph-card--${variant}`}
-      title={variant === 'full' ? scopeTitle(scope, data.data, date) : 'Network Graph'}
+      title={variant === 'full' ? scopeTitle(scope, data.data, date, home) : 'Network Graph'}
       actions={<GraphLegend detailed={variant === 'full'} />}
       bodyClassName="graph-card__body"
     >
       <div className="graph-toolbar" role="group" aria-label="Graph filters">
         {scope.kind !== 'network' && (
           <button type="button" className="button button--ghost button--small" onClick={() => onScopeChange(NETWORK_SCOPE)}>
-            <LuArrowLeft aria-hidden /> National network
+            <LuArrowLeft aria-hidden /> {home} network
           </button>
         )}
         {variant === 'dashboard' && scope.kind !== 'network' && (
-          <span className="graph-toolbar__scope">{scopeTitle(scope, data.data, date)}</span>
+          <span className="graph-toolbar__scope">{scopeTitle(scope, data.data, date, home)}</span>
         )}
         {usesWindow && (
           <label className="field field--inline">

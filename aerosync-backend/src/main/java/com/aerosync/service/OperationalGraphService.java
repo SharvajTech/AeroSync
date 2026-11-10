@@ -24,6 +24,7 @@ import com.aerosync.repository.AirportRepository;
 import com.aerosync.repository.FlightDependencyRepository;
 import com.aerosync.repository.FlightInstanceRepository;
 import com.aerosync.repository.FlightScheduleRepository;
+import com.aerosync.security.AirportScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -50,6 +51,14 @@ import java.util.UUID;
  * risk from its own feature graph, while this service exposes the physical
  * network (DEPARTS_FROM / ARRIVES_AT) and the operational dependencies stored
  * in {@code flight_dependencies}.</p>
+ *
+ * <p><b>Airport scope (Stage 3).</b> Every public view has a variant taking an
+ * {@link AirportScope}. A scoped graph only contains flights departing from or
+ * arriving at an airport in scope, and dependencies whose <em>both</em> flights
+ * are visible. Traversals only follow such dependencies, so a path through a
+ * flight of another airport is never revealed, not even as a count. The
+ * variants without a scope are for internal callers and use
+ * {@link AirportScope#unrestricted()}.</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -77,15 +86,37 @@ public class OperationalGraphService {
 
     /** All airports plus every flight operating on the service date, with their dependencies. */
     public GraphResponse getNationalNetwork(LocalDate serviceDate, boolean includeDependencies) {
+        return getNetwork(serviceDate, includeDependencies, AirportScope.unrestricted());
+    }
+
+    /**
+     * The network of the service date as visible to {@code scope}: the airports
+     * in scope, every flight departing from or arriving at one of them (with its
+     * other endpoint airport) and the dependencies between those flights.
+     * With {@link AirportScope#unrestricted()} this is the national network.
+     */
+    public GraphResponse getNetwork(LocalDate serviceDate, boolean includeDependencies, AirportScope scope) {
         LocalDate day = serviceDate != null ? serviceDate : LocalDate.now(ZoneId.of(operationsTimezone));
 
-        GraphBuilder builder = new GraphBuilder();
-        airportRepository.findAllByOrderByIataCodeAsc()
-                .forEach(airport -> builder.addAirport(OperationalRecordMapper.toRecord(airport)));
-        List<FlightInstance> flights = flightInstanceRepository.findGraphFlightsByServiceDate(day);
+        GraphBuilder builder;
+        List<FlightInstance> flights;
+        if (scope.isUnrestricted()) {
+            GraphBuilder all = new GraphBuilder();
+            airportRepository.findAllByOrderByIataCodeAsc()
+                    .forEach(airport -> all.addAirport(OperationalRecordMapper.toRecord(airport)));
+            builder = all;
+            flights = flightInstanceRepository.findGraphFlightsByServiceDate(day);
+        } else {
+            builder = registeredAirportsBuilder();
+            scope.airports().forEach(builder::includeAirport);
+            flights = scope.airports().isEmpty()
+                    ? List.of()
+                    : flightInstanceRepository.findGraphFlightsByServiceDateTouchingAirports(day, scope.airports());
+        }
         flights.forEach(flight -> builder.addFlight(OperationalRecordMapper.toRecord(flight)));
         if (includeDependencies && !flights.isEmpty()) {
-            flightDependencyRepository.findActiveByServiceDate(day)
+            flightDependencyRepository.findActiveByServiceDate(day).stream()
+                    .filter(dependency -> visible(dependency, scope))
                     .forEach(dependency -> builder.addDependency(OperationalRecordMapper.toRecord(dependency)));
         }
         return response(GraphView.NATIONAL_NETWORK, null, day, dataWindow(), builder.build(), null);
@@ -97,7 +128,16 @@ public class OperationalGraphService {
      * the dependencies among those flights.
      */
     public GraphResponse getAirportGraph(String iataCode, LocalDate serviceDate, boolean includeDependencies) {
-        Airport airport = requireAirport(iataCode);
+        return getAirportGraph(iataCode, serviceDate, includeDependencies, AirportScope.unrestricted());
+    }
+
+    /**
+     * Airport view for a scope: 403 unless the airport is in scope. Dependencies
+     * to flights outside the scope are left out.
+     */
+    public GraphResponse getAirportGraph(String iataCode, LocalDate serviceDate, boolean includeDependencies,
+                                         AirportScope scope) {
+        Airport airport = requireAirport(iataCode, scope);
         ZoneId zone = ZoneId.of(airport.getTimezone());
         LocalDate day = serviceDate != null ? serviceDate : LocalDate.now(zone);
         Instant windowStart = day.atStartOfDay(zone).toInstant();
@@ -112,7 +152,8 @@ public class OperationalGraphService {
             Set<UUID> flightIds = new LinkedHashSet<>();
             flights.forEach(flight -> flightIds.add(flight.getFlightId()));
             for (List<UUID> chunk : chunks(flightIds)) {
-                flightDependencyRepository.findActiveTouching(chunk)
+                flightDependencyRepository.findActiveTouching(chunk).stream()
+                        .filter(dependency -> visible(dependency, scope))
                         .forEach(dependency -> builder.addDependency(OperationalRecordMapper.toRecord(dependency)));
             }
         }
@@ -122,19 +163,24 @@ public class OperationalGraphService {
 
     /** A flight with its upstream and downstream dependencies up to {@code depth} hops. */
     public GraphResponse getFlightGraph(UUID flightId, int depth) {
+        return getFlightGraph(flightId, depth, AirportScope.unrestricted());
+    }
+
+    /** Flight view for a scope: 403 unless the flight is visible; traversal stays inside the scope. */
+    public GraphResponse getFlightGraph(UUID flightId, int depth, AirportScope scope) {
         if (depth < 1 || depth > MAX_FLIGHT_VIEW_DEPTH) {
             throw new InvalidRequestParameterException(
                     "depth must be between 1 and " + MAX_FLIGHT_VIEW_DEPTH + ", was " + depth);
         }
-        FlightInstance focus = requireFlight(flightId);
+        FlightInstance focus = requireFlight(flightId, scope);
         Instant start = focus.getSchedule().getScheduledDeparture();
         DependencyTraversal.Options options =
                 new DependencyTraversal.Options(depth, null, 0.0, null, MAX_TRAVERSAL_FLIGHTS);
 
-        DependencyTraversal.Result upstream =
-                DependencyTraversal.traverse(flightId, start, Direction.UPSTREAM, options, this::loadDependencies);
-        DependencyTraversal.Result downstream =
-                DependencyTraversal.traverse(flightId, start, Direction.DOWNSTREAM, options, this::loadDependencies);
+        DependencyTraversal.Result upstream = DependencyTraversal.traverse(flightId, start, Direction.UPSTREAM,
+                options, (direction, frontier) -> loadDependencies(direction, frontier, scope));
+        DependencyTraversal.Result downstream = DependencyTraversal.traverse(flightId, start, Direction.DOWNSTREAM,
+                options, (direction, frontier) -> loadDependencies(direction, frontier, scope));
 
         Set<UUID> flightIds = new LinkedHashSet<>();
         flightIds.add(flightId);
@@ -163,6 +209,14 @@ public class OperationalGraphService {
      */
     public GraphResponse getAffectedFlights(UUID flightId, int maxDepth, Integer horizonHours,
                                             Set<DependencyType> types, double minImpactWeight, int maxFlights) {
+        return getAffectedFlights(flightId, maxDepth, horizonHours, types, minImpactWeight, maxFlights,
+                AirportScope.unrestricted());
+    }
+
+    /** Affected flights for a scope: 403 unless the flight is visible; only visible flights are reached. */
+    public GraphResponse getAffectedFlights(UUID flightId, int maxDepth, Integer horizonHours,
+                                            Set<DependencyType> types, double minImpactWeight, int maxFlights,
+                                            AirportScope scope) {
         if (maxDepth < 1 || maxDepth > MAX_TRAVERSAL_DEPTH) {
             throw new InvalidRequestParameterException(
                     "max_depth must be between 1 and " + MAX_TRAVERSAL_DEPTH + ", was " + maxDepth);
@@ -183,11 +237,12 @@ public class OperationalGraphService {
                 ? EnumSet.allOf(DependencyType.class)
                 : EnumSet.copyOf(types);
 
-        FlightInstance focus = requireFlight(flightId);
+        FlightInstance focus = requireFlight(flightId, scope);
         DependencyTraversal.Options options = new DependencyTraversal.Options(maxDepth, followed, minImpactWeight,
                 horizonHours == null ? null : Duration.ofHours(horizonHours), maxFlights);
         DependencyTraversal.Result downstream = DependencyTraversal.traverse(flightId,
-                focus.getSchedule().getScheduledDeparture(), Direction.DOWNSTREAM, options, this::loadDependencies);
+                focus.getSchedule().getScheduledDeparture(), Direction.DOWNSTREAM, options,
+                (direction, frontier) -> loadDependencies(direction, frontier, scope));
 
         Set<UUID> flightIds = new LinkedHashSet<>();
         flightIds.add(flightId);
@@ -228,35 +283,62 @@ public class OperationalGraphService {
 
     // ── helpers ──────────────────────────────────────────────────────────
 
-    private Airport requireAirport(String iataCode) {
+    /** 400 for a malformed code, 404 for an unknown airport, 403 outside the scope. */
+    private Airport requireAirport(String iataCode, AirportScope scope) {
         String iata;
         try {
             iata = NetworkIdentifiers.normalizeIata(iataCode);
         } catch (IllegalArgumentException ex) {
             throw new InvalidRequestParameterException(ex.getMessage());
         }
-        return airportRepository.findByIataCode(iata)
+        Airport airport = airportRepository.findByIataCode(iata)
                 .orElseThrow(() -> new ResourceNotFoundException("Airport " + iata + " not found"));
+        scope.requireAirport(iata);
+        return airport;
     }
 
-    private FlightInstance requireFlight(UUID flightId) {
-        return flightInstanceRepository.findGraphFlightById(flightId)
+    private FlightInstance requireFlight(UUID flightId, AirportScope scope) {
+        FlightInstance flight = flightInstanceRepository.findGraphFlightById(flightId)
                 .orElseThrow(() -> new ResourceNotFoundException("Flight instance " + flightId + " not found"));
+        FlightSchedule schedule = flight.getSchedule();
+        scope.requireView(schedule.getOrigin().getIataCode(), schedule.getDestination().getIataCode(),
+                "Flight " + schedule.getFlightNumber());
+        return flight;
+    }
+
+    /** A flight is visible when it departs from or arrives at an airport in scope. */
+    private static boolean visible(FlightInstance flight, AirportScope scope) {
+        if (scope.isUnrestricted()) {
+            return true;
+        }
+        FlightSchedule schedule = flight.getSchedule();
+        return scope.canView(schedule.getOrigin().getIataCode(), schedule.getDestination().getIataCode());
+    }
+
+    /** A dependency is visible only when both of its flights are. */
+    private static boolean visible(FlightDependency dependency, AirportScope scope) {
+        return scope.isUnrestricted()
+                || (visible(dependency.getSourceFlight(), scope) && visible(dependency.getTargetFlight(), scope));
     }
 
     private GraphBuilder registeredAirportsBuilder() {
         GraphBuilder builder = new GraphBuilder();
-        airportRepository.findAll().forEach(airport -> builder.registerAirport(OperationalRecordMapper.toRecord(airport)));
+        airportRepository.findAllByOrderByIataCodeAsc()
+                .forEach(airport -> builder.registerAirport(OperationalRecordMapper.toRecord(airport)));
         return builder;
     }
 
-    private List<DependencyRecord> loadDependencies(Direction direction, Set<UUID> frontier) {
+    private List<DependencyRecord> loadDependencies(Direction direction, Set<UUID> frontier, AirportScope scope) {
         List<DependencyRecord> records = new ArrayList<>();
         for (List<UUID> chunk : chunks(frontier)) {
             List<FlightDependency> rows = direction == Direction.DOWNSTREAM
                     ? flightDependencyRepository.findActiveOutgoing(chunk)
                     : flightDependencyRepository.findActiveIncoming(chunk);
-            rows.forEach(row -> records.add(OperationalRecordMapper.toRecord(row)));
+            for (FlightDependency row : rows) {
+                if (visible(row, scope)) {
+                    records.add(OperationalRecordMapper.toRecord(row));
+                }
+            }
         }
         return records;
     }
