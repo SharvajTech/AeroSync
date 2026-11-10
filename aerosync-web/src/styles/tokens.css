@@ -1,0 +1,57 @@
+/*
+ * AeroSync design tokens. Light, restrained palette: blue is the accent,
+ * green means healthy/operational, amber and red only for warnings and
+ * disruptions. Graph colours in src/graph/style.ts mirror these values.
+ */
+:root {
+  --font-sans: Inter, "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f3f4f6;
+  --color-border: #e5e7eb;
+  --color-border-strong: #d1d5db;
+
+  --color-text: #111827;
+  --color-text-secondary: #4b5563;
+  --color-text-muted: #6b7280;
+
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-soft: #eaf1fe;
+  --color-primary-border: #bfd3fb;
+
+  --color-success: #16a34a;
+  --color-success-soft: #e8f7ee;
+  --color-success-border: #bbe5c8;
+  --color-warning: #b45309;
+  --color-warning-soft: #fef6e7;
+  --color-warning-border: #f7d9a3;
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fdecec;
+  --color-danger-border: #f5c2c2;
+  --color-info: #1e40af;
+  --color-info-soft: #eef2ff;
+
+  --color-dependency: #ea580c;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.04);
+  --shadow-popover: 0 8px 24px rgba(16, 24, 40, 0.12);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --sidebar-width: 232px;
+  --topbar-height: 64px;
+  --panel-width: 360px;
+}

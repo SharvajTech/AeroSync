@@ -125,6 +125,7 @@ flowchart TB
 | Layer | Technologies |
 |-------|----------------|
 | **Backend** | Java 17, Spring Boot 4.x, Spring Data JPA, Spring WebFlux, Lombok |
+| **Web dashboard** | React 19, TypeScript, Vite, Cytoscape.js (network graph) |
 | **Database** | PostgreSQL (JSONB for resolution payloads) |
 | **ML service** | Python 3.11+, FastAPI, Uvicorn, scikit-learn, XGBoost, NetworkX, pandas, joblib |
 | **AI / LLM** | Google Gemini 2.5 Flash (explanation generation) |
@@ -148,6 +149,8 @@ AeroSync/
 │       ├── dto/                      # Prediction request/response DTOs
 │       ├── security/                 # JWT filter and utilities
 │       └── config/                   # WebClient beans, app configuration
+│
+├── aerosync-web/                     # React operations dashboard (network graph, airports, flights)
 │
 ├── aerosync-ml/                      # FastAPI ML & graph service
 │   ├── main.py                       # Prediction, batch, weather, cascade endpoints
@@ -317,7 +320,17 @@ cd aerosync-backend
 
 On first launch, `DataSeederService` populates gates, crew, and a daily flight schedule. Ensure `ml.service.url` points to the running ML service (`http://localhost:8000`).
 
-### 4. Quick smoke test
+### 4. Start the web dashboard
+
+```bash
+cd aerosync-web
+npm install
+npm run dev          # http://localhost:3000, proxies /api to http://localhost:8080
+```
+
+See [`aerosync-web/README.md`](aerosync-web/README.md) for configuration, tests and the Docker image.
+
+### 5. Quick smoke test
 
 ```bash
 # ML health
@@ -362,7 +375,7 @@ Configure via `application.properties` (backend) and environment variables (ML).
 
 ## Roadmap
 
-- [ ] React/Next.js operations dashboard (CORS already configured for `:3000`)
+- [x] React operations dashboard (`aerosync-web`, port 3000)
 - [ ] WebSocket live disruption feed
 - [ ] OpenSky Network integration for real flight telemetry (`data/opensky_fetcher.py`)
 - [ ] Unit and integration tests for rule engine and cascade logic

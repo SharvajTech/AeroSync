@@ -1,3 +1,4 @@
+
 package com.aerosync.service;
 
 import com.aerosync.model.Crew;
@@ -10,9 +11,11 @@ import com.aerosync.repository.GateRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -20,75 +23,77 @@ import java.util.stream.Collectors;
 public class ResolutionAlgorithmService {
 
     private final FlightRepository flightRepository;
-    private final GateRepository   gateRepository;
-    private final CrewRepository   crewRepository;
+    private final GateRepository gateRepository;
+    private final CrewRepository crewRepository;
 
-    // ── MAIN RESOLUTION ALGORITHM ─────────────────────────────────────────────
-    // Pure algorithmic resolution — no LLM involved
-    // Returns a structured resolution that can be:
-    // 1. Applied directly (rule-based decisions)
-    // 2. Passed to LLM for explanation enrichment (hybrid mode)
+    // ============================================================
+    // MAIN RESOLUTION ALGORITHM
+    // ============================================================
+
     public Map<String, Object> resolveAlgorithmically(
             Disruption disruption, Flight flight) {
 
-        log.info("🔧 Algorithm resolving disruption {} for flight {}",
+        log.info("Algorithm resolving disruption {} for flight {}",
                 disruption.getId(), flight.getFlightId());
 
         Map<String, Object> resolution = new LinkedHashMap<>();
         List<String> actionsLog = new ArrayList<>();
 
-        // Step 1 — Run DGCA rule checks
         Map<String, Object> ruleCheck = runRuleEngine(flight);
-        resolution.put("rule_violations",
-                ruleCheck.get("violations"));
-        resolution.put("rule_status",
-                ruleCheck.get("status"));
+        resolution.put("rule_violations", ruleCheck.get("violations"));
+        resolution.put("rule_status", ruleCheck.get("status"));
 
-        // Step 2 — Gate resolution algorithm
-        Map<String, Object> gateRes = resolveGate(
-                flight, disruption.getType());
+        Map<String, Object> gateRes =
+                resolveGate(flight, disruption.getType());
+
         resolution.put("gate_resolution", gateRes);
+
         if ("REASSIGNED".equals(gateRes.get("action"))) {
             actionsLog.add("Gate reassigned: "
                     + flight.getAssignedGate()
-                    + " → " + gateRes.get("new_gate"));
-            applyGateChange(flight,
-                    (String) gateRes.get("new_gate"));
+                    + " -> " + gateRes.get("new_gate"));
+
+            applyGateChange(flight, (String) gateRes.get("new_gate"));
         }
 
-        // Step 3 — Crew resolution algorithm
-        Map<String, Object> crewRes = resolveCrew(
-                flight, disruption.getType());
+        Map<String, Object> crewRes =
+                resolveCrew(flight, disruption.getType());
+
         resolution.put("crew_resolution", crewRes);
+
         if ("SWAPPED".equals(crewRes.get("action"))) {
             actionsLog.add("Crew swapped: "
                     + flight.getAssignedCrewId()
-                    + " → " + crewRes.get("new_crew_id"));
-            applyCrewChange(flight,
+                    + " -> " + crewRes.get("new_crew_id"));
+
+            applyCrewChange(
+                    flight,
                     (String) crewRes.get("new_crew_id"));
         }
 
-        // Step 4 — Passenger resolution algorithm
-        Map<String, Object> paxRes = resolvePassengers(
-                flight, disruption);
+        Map<String, Object> paxRes =
+                resolvePassengers(flight, disruption);
+
         resolution.put("passenger_resolution", paxRes);
+
         if (!"NONE".equals(paxRes.get("action"))) {
             actionsLog.add("Passengers: "
-                    + paxRes.get("action") + " — "
-                    + paxRes.get("affected_count") + " pax");
+                    + paxRes.get("action")
+                    + " - " + paxRes.get("affected_count") + " pax");
         }
 
-        // Step 5 — Aircraft resolution algorithm
-        Map<String, Object> acRes = resolveAircraft(
-                flight, disruption.getType());
+        Map<String, Object> acRes =
+                resolveAircraft(flight, disruption.getType());
+
         resolution.put("aircraft_resolution", acRes);
-        if ("SWAPPED".equals(acRes.get("action"))) {
-            actionsLog.add("Aircraft swap recommended");
+
+        if ("SWAP_REQUIRED".equals(acRes.get("action"))) {
+            actionsLog.add("Aircraft replacement required");
         }
 
-        // Step 6 — Delay estimation algorithm
         int estimatedDelay = estimateRemainingDelay(
-                flight, disruption, gateRes, crewRes);
+                disruption, gateRes, crewRes);
+
         double costImpact = estimatedDelay * 150.0
                 + (disruption.getPassengersAffected() != null
                 ? disruption.getPassengersAffected() * 30.0 : 0);
@@ -96,82 +101,103 @@ public class ResolutionAlgorithmService {
         resolution.put("estimated_new_delay_mins", estimatedDelay);
         resolution.put("total_cost_impact", costImpact);
         resolution.put("actions_taken", actionsLog);
+
         resolution.put("severity",
-                estimatedDelay > 120 ? "CRITICAL" :
-                        estimatedDelay > 60  ? "HIGH" :
-                        estimatedDelay > 30  ? "MEDIUM" : "LOW");
+                estimatedDelay > 120 ? "CRITICAL"
+                        : estimatedDelay > 60 ? "HIGH"
+                        : estimatedDelay > 30 ? "MEDIUM" : "LOW");
+
         resolution.put("confidence_score", 0.95);
         resolution.put("resolution_method", "ALGORITHMIC");
         resolution.put("algorithm_version", "2.0");
 
-        log.info("✅ Algorithm resolved {} actions for flight {}",
+        log.info("Algorithm resolved {} actions for flight {}",
                 actionsLog.size(), flight.getFlightId());
+
         return resolution;
     }
 
+    // ============================================================
+    // RULE ENGINE
+    // ============================================================
 
-    // ── RULE ENGINE ───────────────────────────────────────────────────────────
     private Map<String, Object> runRuleEngine(Flight flight) {
+
         List<Map<String, String>> violations = new ArrayList<>();
         String status = "CLEAR";
 
-        // DGCA Rule 1 — crew duty hours
+        // DGCA Rule 1: Crew duty hours
         if (flight.getCrewDutyHours() != null) {
+
             if (flight.getCrewDutyHours() >= 12.0) {
                 violations.add(Map.of(
-                        "rule",     "DGCA_MAX_DUTY",
+                        "rule", "DGCA_MAX_DUTY",
                         "severity", "BLOCK",
-                        "message",  "Crew at " + flight.getCrewDutyHours()
-                                + "h — DGCA 12h maximum exceeded"
+                        "message", "Crew at "
+                                + flight.getCrewDutyHours()
+                                + "h - DGCA 12h maximum exceeded"
                 ));
+
                 status = "BLOCKED";
+
             } else if (flight.getCrewDutyHours() >= 10.0) {
+
                 violations.add(Map.of(
-                        "rule",     "DGCA_DUTY_WARNING",
+                        "rule", "DGCA_DUTY_WARNING",
                         "severity", "WARN",
-                        "message",  "Crew at " + flight.getCrewDutyHours()
-                                + "h — approaching DGCA limit"
+                        "message", "Crew at "
+                                + flight.getCrewDutyHours()
+                                + "h - approaching DGCA limit"
                 ));
-                if (!"BLOCKED".equals(status)) status = "WARNING";
+
+                if (!"BLOCKED".equals(status)) {
+                    status = "WARNING";
+                }
             }
         }
 
-        // DGCA Rule 2 — weather severity for aircraft type
+        // DGCA Rule 2: Severe weather for ATR72
         if (flight.getWeatherScore() != null
                 && flight.getWeatherScore() == 3
                 && "ATR72".equals(flight.getAircraftType())) {
+
             violations.add(Map.of(
-                    "rule",     "WEATHER_ATR72_BLOCK",
+                    "rule", "WEATHER_ATR72_BLOCK",
                     "severity", "BLOCK",
-                    "message",  "Severe weather — ATR72 ops suspended"
+                    "message", "Severe weather - ATR72 operations suspended"
             ));
+
             status = "BLOCKED";
         }
 
-        // Rule 3 — gate turnaround
+        // Rule 3: Gate turnaround
         if (flight.getGateTurnaroundMins() != null
                 && flight.getGateTurnaroundMins() < 20) {
+
             violations.add(Map.of(
-                    "rule",     "GATE_TURNAROUND_CRITICAL",
+                    "rule", "GATE_TURNAROUND_CRITICAL",
                     "severity", "WARN",
-                    "message",  "Turnaround " + flight.getGateTurnaroundMins()
-                            + " min — critically short"
+                    "message", "Turnaround "
+                            + flight.getGateTurnaroundMins()
+                            + " min - critically short"
             ));
-            if (!"BLOCKED".equals(status)) status = "WARNING";
+
+            if (!"BLOCKED".equals(status)) {
+                status = "WARNING";
+            }
         }
 
         return Map.of(
-                "status",     status,
+                "status", status,
                 "violations", violations,
                 "can_depart", !"BLOCKED".equals(status)
         );
     }
 
+    // ============================================================
+    // GATE RESOLUTION
+    // ============================================================
 
-    // ── GATE RESOLUTION ALGORITHM ─────────────────────────────────────────────
-    // Algorithm: score all available gates and pick the best one
-    // Score = compatibility (must) + turnaround buffer + terminal proximity
-    @SuppressWarnings("unchecked")
     private Map<String, Object> resolveGate(
             Flight flight,
             Disruption.DisruptionType type) {
@@ -182,277 +208,385 @@ public class ResolutionAlgorithmService {
                         && flight.getGateTurnaroundMins() < 30);
 
         if (!needsReassignment) {
-            return Map.of(
-                    "action",   "KEEP",
-                    "new_gate", flight.getAssignedGate(),
-                    "reason",   "Gate adequate for current situation",
-                    "score",    100
-            );
+
+            Map<String, Object> result = new LinkedHashMap<>();
+
+            result.put("action", "KEEP");
+
+            if (flight.getAssignedGate() != null) {
+                result.put("new_gate", flight.getAssignedGate());
+            }
+
+            result.put("reason", "Gate adequate for current situation");
+            result.put("score", 100);
+
+            return result;
         }
 
         List<Gate> available = gateRepository.findByAvailableTrue();
-        String aircraftType  = flight.getAircraftType() != null
-                ? flight.getAircraftType() : "A320";
 
-        // Score each available gate
-        Gate bestGate  = null;
-        int  bestScore = -1;
+        if (available == null) {
+            available = Collections.emptyList();
+        }
+
+        String aircraftType = flight.getAircraftType() != null
+                ? flight.getAircraftType()
+                : "A320";
+
+        Gate bestGate = null;
+        int bestScore = -1;
 
         for (Gate gate : available) {
-            // Must be compatible with aircraft type
-            if (gate.getCompatibleTypes() == null
-                    || !gate.getCompatibleTypes()
-                    .contains(aircraftType)) {
+
+            if (gate == null || gate.getGateNumber() == null) {
                 continue;
             }
-            // Must not be current gate
-            if (gate.getGateNumber().equals(
+
+            // Exact aircraft compatibility
+            if (!hasExactCsvValue(
+                    gate.getCompatibleTypes(), aircraftType)) {
+                continue;
+            }
+
+            // Do not select the currently assigned gate
+            if (Objects.equals(
+                    gate.getGateNumber(),
                     flight.getAssignedGate())) {
                 continue;
             }
 
-            int score = 50; // base
+            int score = 50;
 
             // Prefer same terminal
-            if (flight.getAssignedGate() != null) {
-                String currentTerminal = flight
-                        .getAssignedGate().substring(0, 1);
-                if (gate.getTerminal() != null
-                        && gate.getTerminal()
-                        .contains(currentTerminal)) {
+            String assignedGate = flight.getAssignedGate();
+
+            if (assignedGate != null && !assignedGate.isBlank()
+                    && gate.getTerminal() != null) {
+
+                String currentTerminal =
+                        assignedGate.substring(0, 1);
+
+                if (gate.getTerminal().contains(currentTerminal)) {
                     score += 30;
                 }
             }
 
-            // Prefer wider aircraft compatibility
-            // (more compatible types = more flexible gate)
-            if (gate.getCompatibleTypes() != null) {
-                score += gate.getCompatibleTypes()
-                        .split(",").length * 5;
-            }
+            // Prefer gates compatible with more aircraft types
+            score += gate.getCompatibleTypes()
+                    .split(",").length * 5;
 
             if (score > bestScore) {
                 bestScore = score;
-                bestGate  = gate;
+                bestGate = gate;
             }
         }
 
         if (bestGate == null) {
-            return Map.of(
-                    "action",   "KEEP",
-                    "new_gate", flight.getAssignedGate(),
-                    "reason",   "No compatible gate available — keeping current",
-                    "score",    0
-            );
+
+            Map<String, Object> result = new LinkedHashMap<>();
+
+            result.put("action", "KEEP");
+
+            if (flight.getAssignedGate() != null) {
+                result.put("new_gate", flight.getAssignedGate());
+            }
+
+            result.put(
+                    "reason",
+                    "No compatible gate available - keeping current");
+
+            result.put("score", 0);
+
+            return result;
         }
 
-        return Map.of(
-                "action",   "REASSIGNED",
-                "new_gate", bestGate.getGateNumber(),
-                "terminal", bestGate.getTerminal() != null
-                        ? bestGate.getTerminal() : "T1",
-                "reason",   "Gate conflict/tight turnaround resolved. "
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        result.put("action", "REASSIGNED");
+        result.put("new_gate", bestGate.getGateNumber());
+
+        result.put(
+                "terminal",
+                bestGate.getTerminal() != null
+                        ? bestGate.getTerminal() : "T1");
+
+        result.put(
+                "reason",
+                "Gate conflict/tight turnaround resolved. "
                         + "Reassigned to compatible gate "
-                        + bestGate.getGateNumber(),
-                "score",    bestScore
-        );
+                        + bestGate.getGateNumber());
+
+        result.put("score", bestScore);
+
+        return result;
     }
 
+    // ============================================================
+    // CREW RESOLUTION
+    // ============================================================
 
-    // ── CREW RESOLUTION ALGORITHM ─────────────────────────────────────────────
-    // Algorithm: find crew with most remaining hours + correct certification
-    // Priority: duty hours remaining DESC, then certification match
     private Map<String, Object> resolveCrew(
             Flight flight,
             Disruption.DisruptionType type) {
 
         double crewDuty = flight.getCrewDutyHours() != null
-                ? flight.getCrewDutyHours() : 0.0;
+                ? flight.getCrewDutyHours()
+                : 0.0;
 
-        // Swap needed if duty hours above threshold or crew timeout
         boolean needsSwap =
                 crewDuty >= 10.0
                         || type == Disruption.DisruptionType.CREW_TIMEOUT;
 
         if (!needsSwap) {
-            return Map.of(
-                    "action",      "KEEP",
-                    "new_crew_id", flight.getAssignedCrewId(),
-                    "reason",      "Crew duty hours acceptable: "
-                            + crewDuty + "/12h",
-                    "hours_remaining", 12.0 - crewDuty
-            );
+
+            Map<String, Object> result = new LinkedHashMap<>();
+
+            result.put("action", "KEEP");
+
+            if (flight.getAssignedCrewId() != null) {
+                result.put(
+                        "new_crew_id",
+                        flight.getAssignedCrewId());
+            }
+
+            result.put(
+                    "reason",
+                    "Crew duty hours acceptable: " + crewDuty + "/12h");
+
+            result.put("hours_remaining", 12.0 - crewDuty);
+
+            return result;
         }
 
         String aircraftType = flight.getAircraftType() != null
-                ? flight.getAircraftType() : "A320";
+                ? flight.getAircraftType()
+                : "A320";
 
         List<Crew> available = crewRepository.findByAvailableTrue();
 
-        // Score each available crew member
-        Crew   bestCrew  = null;
+        if (available == null) {
+            available = Collections.emptyList();
+        }
+
+        Crew bestCrew = null;
         double bestScore = -1;
 
         for (Crew crew : available) {
-            // Skip current crew
-            if (crew.getCrewId().equals(
+
+            if (crew == null || crew.getCrewId() == null) {
+                continue;
+            }
+
+            // Do not select current crew
+            if (Objects.equals(
+                    crew.getCrewId(),
                     flight.getAssignedCrewId())) {
                 continue;
             }
 
-            // Must have certification for this aircraft
-            if (crew.getCertifications() == null
-                    || !crew.getCertifications()
-                    .contains(aircraftType)) {
+            // Require exact aircraft certification
+            if (!hasExactCsvValue(
+                    crew.getCertifications(), aircraftType)) {
                 continue;
             }
 
-            // Must have at least 2 hours remaining (DGCA minimum)
-            double remaining = crew.getMaxDutyHours() != null
-                    ? crew.getMaxDutyHours() - crew.getDutyHoursUsed()
-                    : 12.0 - crew.getDutyHoursUsed();
+            double dutyUsed = crew.getDutyHoursUsed() != null
+                    ? crew.getDutyHoursUsed()
+                    : 0.0;
 
-            if (remaining < 2.0) continue;
+            double maxDuty = crew.getMaxDutyHours() != null
+                    ? crew.getMaxDutyHours()
+                    : 12.0;
 
-            // Score: higher remaining hours = better
-            // Pilot role preferred over co-pilot for captain replacement
+            double remaining = maxDuty - dutyUsed;
+
+            // At least two hours remaining
+            if (remaining < 2.0) {
+                continue;
+            }
+
             double score = remaining * 10;
-            if ("PILOT".equals(crew.getRole())) score += 20;
+
+            if ("PILOT".equalsIgnoreCase(crew.getRole())) {
+                score += 20;
+            }
 
             if (score > bestScore) {
                 bestScore = score;
-                bestCrew  = crew;
+                bestCrew = crew;
             }
         }
 
         if (bestCrew == null) {
-            return Map.of(
-                    "action",      "KEEP",
-                    "new_crew_id", flight.getAssignedCrewId(),
-                    "reason",      "No qualified crew available — "
-                            + "manual escalation required",
-                    "hours_remaining", 12.0 - crewDuty
-            );
+
+            Map<String, Object> result = new LinkedHashMap<>();
+
+            result.put("action", "KEEP");
+
+            if (flight.getAssignedCrewId() != null) {
+                result.put(
+                        "new_crew_id",
+                        flight.getAssignedCrewId());
+            }
+
+            result.put(
+                    "reason",
+                    "No qualified crew available - "
+                            + "manual escalation required");
+
+            result.put("hours_remaining", 12.0 - crewDuty);
+
+            return result;
         }
 
-        double newRemaining = (bestCrew.getMaxDutyHours() != null
-                ? bestCrew.getMaxDutyHours()
-                : 12.0) - bestCrew.getDutyHoursUsed();
+        double dutyUsed = bestCrew.getDutyHoursUsed() != null
+                ? bestCrew.getDutyHoursUsed()
+                : 0.0;
 
-        return Map.of(
-                "action",          "SWAPPED",
-                "old_crew_id",     flight.getAssignedCrewId() != null
-                        ? flight.getAssignedCrewId() : "NONE",
-                "new_crew_id",     bestCrew.getCrewId(),
-                "new_crew_role",   bestCrew.getRole(),
-                "hours_remaining", round(newRemaining),
-                "reason",          "Current crew at " + crewDuty
+        double maxDuty = bestCrew.getMaxDutyHours() != null
+                ? bestCrew.getMaxDutyHours()
+                : 12.0;
+
+        double newRemaining = maxDuty - dutyUsed;
+
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        result.put("action", "SWAPPED");
+
+        result.put(
+                "old_crew_id",
+                flight.getAssignedCrewId() != null
+                        ? flight.getAssignedCrewId()
+                        : "NONE");
+
+        result.put("new_crew_id", bestCrew.getCrewId());
+
+        if (bestCrew.getRole() != null) {
+            result.put("new_crew_role", bestCrew.getRole());
+        }
+
+        result.put("hours_remaining", round(newRemaining));
+
+        result.put(
+                "reason",
+                "Current crew at " + crewDuty
                         + "h duty. Swapped to "
                         + bestCrew.getCrewId()
                         + " with " + round(newRemaining)
-                        + "h remaining",
-                "score",           bestScore
-        );
+                        + "h remaining");
+
+        result.put("score", bestScore);
+
+        return result;
     }
 
+    // ============================================================
+    // PASSENGER RESOLUTION
+    // ============================================================
 
-    // ── PASSENGER RESOLUTION ALGORITHM ───────────────────────────────────────
     private Map<String, Object> resolvePassengers(
-            Flight flight, Disruption disruption) {
+            Flight flight,
+            Disruption disruption) {
 
         int delayMins = disruption.getDelayMinutes() != null
-                ? disruption.getDelayMinutes() : 0;
-        int paxCount  = disruption.getPassengersAffected() != null
-                ? disruption.getPassengersAffected() : 0;
+                ? disruption.getDelayMinutes()
+                : 0;
+
+        int paxCount = disruption.getPassengersAffected() != null
+                ? disruption.getPassengersAffected()
+                : 0;
 
         if (delayMins <= 0 || paxCount <= 0) {
             return Map.of(
-                    "action",        "NONE",
+                    "action", "NONE",
                     "affected_count", 0,
-                    "reason",        "No passenger impact"
+                    "reason", "No passenger impact"
             );
         }
 
         if (delayMins > 120) {
             return Map.of(
-                    "action",          "REBOOK",
-                    "affected_count",  paxCount,
-                    "priority",        "BUSINESS_FIRST",
-                    "compensation",    "MEALS + HOTEL",
-                    "reason",          "Delay > 2 hours. "
-                            + "Full rebooking with compensation.",
-                    "estimated_cost",  paxCount * 50.0
-            );
-        } else if (delayMins > 60) {
-            return Map.of(
-                    "action",         "REBOOK",
-                    "affected_count", (int)(paxCount * 0.2),
-                    "priority",       "BUSINESS_FIRST",
-                    "compensation",   "MEALS",
-                    "reason",         "Delay > 1 hour. "
-                            + "Rebook connecting passengers.",
-                    "estimated_cost", (int)(paxCount * 0.2) * 30.0
-            );
-        } else {
-            return Map.of(
-                    "action",         "NOTIFY",
+                    "action", "REBOOK",
                     "affected_count", paxCount,
-                    "channel",        "SMS + APP",
-                    "reason",         "Delay < 1 hour. "
-                            + "Notify all passengers.",
-                    "estimated_cost", paxCount * 2.0
+                    "priority", "BUSINESS_FIRST",
+                    "compensation", "MEALS + HOTEL",
+                    "reason",
+                    "Delay > 2 hours. Full rebooking with compensation.",
+                    "estimated_cost", paxCount * 50.0
+            );
+
+        } else if (delayMins > 60) {
+
+            int affected = (int) (paxCount * 0.2);
+
+            return Map.of(
+                    "action", "REBOOK",
+                    "affected_count", affected,
+                    "priority", "BUSINESS_FIRST",
+                    "compensation", "MEALS",
+                    "reason",
+                    "Delay > 1 hour. Rebook connecting passengers.",
+                    "estimated_cost", affected * 30.0
             );
         }
+
+        return Map.of(
+                "action", "NOTIFY",
+                "affected_count", paxCount,
+                "channel", "SMS + APP",
+                "reason", "Delay < 1 hour. Notify all passengers.",
+                "estimated_cost", paxCount * 2.0
+        );
     }
 
+    // ============================================================
+    // AIRCRAFT RESOLUTION
+    // ============================================================
 
-    // ── AIRCRAFT RESOLUTION ALGORITHM ────────────────────────────────────────
     private Map<String, Object> resolveAircraft(
             Flight flight,
             Disruption.DisruptionType type) {
 
-        boolean needsSwap =
-                type == Disruption.DisruptionType.AIRCRAFT_FAULT;
-
-        if (!needsSwap) {
+        if (type != Disruption.DisruptionType.AIRCRAFT_FAULT) {
             return Map.of(
                     "action", "KEEP",
-                    "reason", "Aircraft serviceable. Delay is operational."
+                    "reason",
+                    "Aircraft serviceable. Delay is operational."
             );
         }
 
         return Map.of(
                 "action", "SWAP_REQUIRED",
-                "reason", "Aircraft fault detected. "
-                        + "Engineering inspection required. "
-                        + "Request AOG team.",
+                "reason",
+                "Aircraft fault detected. Engineering inspection "
+                        + "required. Request AOG team.",
                 "priority", "URGENT"
         );
     }
 
+    // ============================================================
+    // DELAY ESTIMATION
+    // ============================================================
 
-    // ── DELAY ESTIMATION ALGORITHM ────────────────────────────────────────────
     private int estimateRemainingDelay(
-            Flight flight, Disruption disruption,
+            Disruption disruption,
             Map<String, Object> gateRes,
             Map<String, Object> crewRes) {
 
         int baseDelay = disruption.getDelayMinutes() != null
-                ? disruption.getDelayMinutes() : 60;
+                ? disruption.getDelayMinutes()
+                : 60;
 
         int reduction = 0;
 
-        // Gate reassignment saves turnaround time
         if ("REASSIGNED".equals(gateRes.get("action"))) {
             reduction += 15;
         }
 
-        // Crew swap takes time but prevents longer delay
         if ("SWAPPED".equals(crewRes.get("action"))) {
-            reduction -= 20; // crew handover adds 20 mins
+            reduction -= 20;
         }
 
-        // Weather delays cannot be reduced algorithmically
         if (disruption.getType()
                 == Disruption.DisruptionType.WEATHER_DELAY) {
             reduction = Math.min(reduction, 10);
@@ -461,282 +595,378 @@ public class ResolutionAlgorithmService {
         return Math.max(15, baseDelay - reduction);
     }
 
+    // ============================================================
+    // DATABASE APPLICATION METHODS
+    // ============================================================
 
-    // ── DB APPLY METHODS ──────────────────────────────────────────────────────
     private void applyGateChange(Flight flight, String newGate) {
+
+        if (newGate == null || newGate.isBlank()
+                || "null".equalsIgnoreCase(newGate.trim())) {
+            return;
+        }
+
         try {
-            // Free old gate
+            List<Gate> gates = gateRepository.findAll();
+
+            // Validate the replacement BEFORE releasing the current gate.
+            Gate targetGate = gates.stream()
+                    .filter(g -> g != null
+                            && Objects.equals(g.getGateNumber(), newGate))
+                    .findFirst()
+                    .orElse(null);
+
+            if (targetGate == null) {
+                log.warn("Gate apply skipped: target gate {} not found", newGate);
+                return;
+            }
+
+            if (Objects.equals(flight.getAssignedGate(), newGate)) {
+                return;
+            }
+
             if (flight.getAssignedGate() != null) {
-                gateRepository.findAll().stream()
-                        .filter(g -> g.getGateNumber()
-                                .equals(flight.getAssignedGate()))
-                        .findFirst().ifPresent(g -> {
+                gates.stream()
+                        .filter(g -> g != null
+                                && Objects.equals(g.getGateNumber(),
+                                        flight.getAssignedGate()))
+                        .findFirst()
+                        .ifPresent(g -> {
                             g.setAvailable(true);
                             g.setCurrentFlightId(null);
                             gateRepository.save(g);
                         });
             }
-            // Assign new gate
-            gateRepository.findAll().stream()
-                    .filter(g -> g.getGateNumber().equals(newGate))
-                    .findFirst().ifPresent(g -> {
-                        g.setAvailable(false);
-                        g.setCurrentFlightId(flight.getFlightId());
-                        gateRepository.save(g);
-                    });
-            // Update flight
+
+            targetGate.setAvailable(false);
+            targetGate.setCurrentFlightId(flight.getFlightId());
+            gateRepository.save(targetGate);
+
             String oldGate = flight.getAssignedGate();
             flight.setAssignedGate(newGate);
             flight.setUpdatedAt(LocalDateTime.now());
             flightRepository.save(flight);
-            log.info("Gate: {} → {}", oldGate, newGate);
+
+            log.info("Gate changed: {} -> {}", oldGate, newGate);
+
         } catch (Exception e) {
             log.warn("Gate apply failed: {}", e.getMessage());
         }
     }
 
     private void applyCrewChange(Flight flight, String newCrewId) {
+
+        if (newCrewId == null || newCrewId.isBlank()
+                || "null".equalsIgnoreCase(newCrewId.trim())) {
+            return;
+        }
+
         try {
-            // Free old crew
+            List<Crew> crewMembers = crewRepository.findAll();
+
+            // Validate the replacement BEFORE releasing the current crew.
+            Crew targetCrew = crewMembers.stream()
+                    .filter(c -> c != null
+                            && Objects.equals(c.getCrewId(), newCrewId))
+                    .findFirst()
+                    .orElse(null);
+
+            if (targetCrew == null) {
+                log.warn("Crew apply skipped: target crew {} not found", newCrewId);
+                return;
+            }
+
+            if (Objects.equals(flight.getAssignedCrewId(), newCrewId)) {
+                return;
+            }
+
             if (flight.getAssignedCrewId() != null) {
-                crewRepository.findAll().stream()
-                        .filter(c -> c.getCrewId()
-                                .equals(flight.getAssignedCrewId()))
-                        .findFirst().ifPresent(c -> {
+                crewMembers.stream()
+                        .filter(c -> c != null
+                                && Objects.equals(c.getCrewId(),
+                                        flight.getAssignedCrewId()))
+                        .findFirst()
+                        .ifPresent(c -> {
                             c.setAvailable(true);
                             c.setCurrentFlightId(null);
                             crewRepository.save(c);
                         });
             }
-            // Assign new crew
-            crewRepository.findAll().stream()
-                    .filter(c -> c.getCrewId().equals(newCrewId))
-                    .findFirst().ifPresent(c -> {
-                        c.setAvailable(false);
-                        c.setCurrentFlightId(flight.getFlightId());
-                        crewRepository.save(c);
-                    });
-            // Update flight
+
+            targetCrew.setAvailable(false);
+            targetCrew.setCurrentFlightId(flight.getFlightId());
+            crewRepository.save(targetCrew);
+
             String oldCrew = flight.getAssignedCrewId();
             flight.setAssignedCrewId(newCrewId);
             flight.setUpdatedAt(LocalDateTime.now());
             flightRepository.save(flight);
-            log.info("Crew: {} → {}", oldCrew, newCrewId);
+
+            log.info("Crew changed: {} -> {}", oldCrew, newCrewId);
+
         } catch (Exception e) {
             log.warn("Crew apply failed: {}", e.getMessage());
         }
     }
 
-    private double round(double v) {
-        return Math.round(v * 10.0) / 10.0;
-    }
-    // ── PROPOSE ONLY — does NOT apply to database ─────────────────────────────
-    // Used by agentic propose/approve flow.
-    // Identical to resolveAlgorithmically() but skips the applyGateChange
-    // and applyCrewChange database writes.
-    // Human must approve before anything is written.
-    public Map<String, Object> proposeOnly(
-            Disruption disruption, Flight flight) {
 
-        log.info("📋 Proposing resolution for flight {} "
-               + "(not applying yet)", flight.getFlightId());
+    // ============================================================
+    // UTILITY METHODS
+    // ============================================================
+
+    private boolean hasExactCsvValue(
+            String csvValues,
+            String expectedValue) {
+
+        if (csvValues == null || expectedValue == null) {
+            return false;
+        }
+
+        return Arrays.stream(csvValues.split(","))
+                .map(String::trim)
+                .anyMatch(value ->
+                        value.equalsIgnoreCase(expectedValue));
+    }
+
+    private double round(double value) {
+        return Math.round(value * 10.0) / 10.0;
+    }
+
+    // ============================================================
+    // PROPOSE ONLY
+    // Does NOT apply changes to the database
+    // ============================================================
+
+    public Map<String, Object> proposeOnly(
+            Disruption disruption,
+            Flight flight) {
+
+        log.info("Proposing resolution for flight {} - not applying yet",
+                flight.getFlightId());
 
         Map<String, Object> proposal = new LinkedHashMap<>();
         List<String> actionsLog = new ArrayList<>();
 
-        // Run rule engine — same as normal resolution
         Map<String, Object> ruleCheck = runRuleEngine(flight);
-        proposal.put("rule_violations", ruleCheck.get("violations"));
-        proposal.put("rule_status",     ruleCheck.get("status"));
 
-        // Gate proposal — score and select but DO NOT write to DB
-        Map<String, Object> gateRes = resolveGate(
-            flight, disruption.getType());
+        proposal.put("rule_violations", ruleCheck.get("violations"));
+        proposal.put("rule_status", ruleCheck.get("status"));
+
+        Map<String, Object> gateRes =
+                resolveGate(flight, disruption.getType());
+
         proposal.put("gate_resolution", gateRes);
+
         if ("REASSIGNED".equals(gateRes.get("action"))) {
             actionsLog.add("Gate reassign: "
-                + flight.getAssignedGate()
-                + " → " + gateRes.get("new_gate"));
+                    + flight.getAssignedGate()
+                    + " -> " + gateRes.get("new_gate"));
         }
 
-        // Crew proposal — score and select but DO NOT write to DB
-        Map<String, Object> crewRes = resolveCrew(
-            flight, disruption.getType());
+        Map<String, Object> crewRes =
+                resolveCrew(flight, disruption.getType());
+
         proposal.put("crew_resolution", crewRes);
+
         if ("SWAPPED".equals(crewRes.get("action"))) {
             actionsLog.add("Crew swap: "
-                + flight.getAssignedCrewId()
-                + " → " + crewRes.get("new_crew_id"));
+                    + flight.getAssignedCrewId()
+                    + " -> " + crewRes.get("new_crew_id"));
         }
 
-        // Passenger and aircraft proposals
-        proposal.put("passenger_resolution",
-            resolvePassengers(flight, disruption));
-        proposal.put("aircraft_resolution",
-            resolveAircraft(flight, disruption.getType()));
+        proposal.put(
+                "passenger_resolution",
+                resolvePassengers(flight, disruption));
 
-        // Delay and cost estimates
+        proposal.put(
+                "aircraft_resolution",
+                resolveAircraft(flight, disruption.getType()));
+
         int estimatedDelay = estimateRemainingDelay(
-            flight, disruption, gateRes, crewRes);
+                disruption, gateRes, crewRes);
+
         double costImpact = estimatedDelay * 150.0
-            + (disruption.getPassengersAffected() != null
-               ? disruption.getPassengersAffected() * 30.0 : 0);
+                + (disruption.getPassengersAffected() != null
+                ? disruption.getPassengersAffected() * 30.0
+                : 0);
 
         proposal.put("estimated_new_delay_mins", estimatedDelay);
-        proposal.put("total_cost_impact",        costImpact);
-        proposal.put("actions_proposed",         actionsLog);
-        proposal.put("severity",
-            estimatedDelay > 120 ? "CRITICAL" :
-            estimatedDelay > 60  ? "HIGH" :
-            estimatedDelay > 30  ? "MEDIUM" : "LOW");
-        proposal.put("confidence_score",    0.95);
-        proposal.put("resolution_method",   "ALGORITHMIC_PROPOSAL");
-        proposal.put("pending_approval",    true);
+        proposal.put("total_cost_impact", costImpact);
+        proposal.put("actions_proposed", actionsLog);
 
-        log.info("📋 Proposal ready — {} actions proposed, "
-               + "awaiting human approval", actionsLog.size());
+        proposal.put(
+                "severity",
+                estimatedDelay > 120 ? "CRITICAL"
+                        : estimatedDelay > 60 ? "HIGH"
+                        : estimatedDelay > 30 ? "MEDIUM"
+                        : "LOW");
+
+        proposal.put("confidence_score", 0.95);
+        proposal.put("resolution_method", "ALGORITHMIC_PROPOSAL");
+        proposal.put("pending_approval", true);
+
+        log.info("Proposal ready - {} actions proposed",
+                actionsLog.size());
+
         return proposal;
     }
 
+    // ============================================================
+    // APPLY APPROVED RESOLUTION
+    // ============================================================
 
-    // ── APPLY APPROVED RESOLUTION — writes to database ───────────────────────
-    // Called after human approves the proposal.
-    // Takes the proposal map (possibly modified by human) and applies it.
     @SuppressWarnings("unchecked")
     public void applyResolution(
-            Map<String, Object> approvedResolution, Flight flight) {
+            Map<String, Object> approvedResolution,
+            Flight flight) {
 
-        log.info("✅ Applying approved resolution for flight {}",
+        log.info("Applying approved resolution for flight {}",
                 flight.getFlightId());
 
-        // Apply gate change if proposed
         Map<String, Object> gateRes =
-            (Map<String, Object>) approvedResolution
-                .get("gate_resolution");
+                (Map<String, Object>) approvedResolution.get(
+                        "gate_resolution");
+
         if (gateRes != null
                 && "REASSIGNED".equals(gateRes.get("action"))) {
+
             String newGate = (String) gateRes.get("new_gate");
-            if (newGate != null && !newGate.equals("null")) {
+
+            if (newGate != null && !newGate.isBlank()) {
                 applyGateChange(flight, newGate);
             }
         }
 
-        // Apply crew change if proposed
         Map<String, Object> crewRes =
-            (Map<String, Object>) approvedResolution
-                .get("crew_resolution");
+                (Map<String, Object>) approvedResolution.get(
+                        "crew_resolution");
+
         if (crewRes != null
                 && "SWAPPED".equals(crewRes.get("action"))) {
+
             String newCrew = (String) crewRes.get("new_crew_id");
-            if (newCrew != null && !newCrew.equals("null")) {
+
+            if (newCrew != null && !newCrew.isBlank()) {
                 applyCrewChange(flight, newCrew);
             }
         }
 
-        log.info("✅ Resolution applied to database for flight {}",
+        log.info("Approved resolution applied for flight {}",
                 flight.getFlightId());
     }
 
+    // ============================================================
+    // RESOLVE WITH CONSTRAINT
+    // ============================================================
 
-    // ── RESOLVE WITH CONSTRAINT ───────────────────────────────────────────────
-    // Called when human rejects a proposal with a reason.
-    // Re-runs algorithm with the rejection reason as a constraint.
-    // Example: reason = "CR-001 is unavailable today"
-    //          → algorithm excludes CR-001 from crew candidates
     public Map<String, Object> resolveWithConstraint(
             Disruption disruption,
             Flight flight,
             String rejectionReason) {
 
-        log.info("🔄 Re-resolving with constraint: {}", rejectionReason);
+        log.info("Re-resolving with constraint: {}", rejectionReason);
 
-        // Parse rejection reason for crew exclusions
         String excludeCrewId = null;
-        String excludeGate   = null;
+        String excludeGate = null;
 
         if (rejectionReason != null) {
-            // Extract crew ID pattern like "CR-001"
-            java.util.regex.Matcher crewMatcher =
-                java.util.regex.Pattern
+
+            Matcher crewMatcher = Pattern
                     .compile("CR-\\d+")
                     .matcher(rejectionReason);
+
             if (crewMatcher.find()) {
                 excludeCrewId = crewMatcher.group();
-                log.info("Excluding crew: {}", excludeCrewId);
             }
 
-            // Extract gate pattern like "A1" or "B3"
-            java.util.regex.Matcher gateMatcher =
-                java.util.regex.Pattern
+            Matcher gateMatcher = Pattern
                     .compile("[A-C]\\d")
                     .matcher(rejectionReason);
+
             if (gateMatcher.find()) {
                 excludeGate = gateMatcher.group();
-                log.info("Excluding gate: {}", excludeGate);
             }
         }
 
-        // Run proposal with exclusions
-        // We temporarily mark excluded resources as unavailable
         boolean crewMarked = false;
         boolean gateMarked = false;
 
-        // Temporarily mark excluded crew unavailable
-        if (excludeCrewId != null) {
-            final String finalCrewId = excludeCrewId;
-            crewRepository.findAll().stream()
-                .filter(c -> c.getCrewId().equals(finalCrewId))
-                .findFirst()
-                .ifPresent(c -> {
-                    c.setAvailable(false);
-                    crewRepository.save(c);
-                });
-            crewMarked = true;
-        }
+        try {
+            if (excludeCrewId != null) {
 
-        // Temporarily mark excluded gate unavailable
-        if (excludeGate != null) {
-            final String finalGate = excludeGate;
-            gateRepository.findAll().stream()
-                .filter(g -> g.getGateNumber().equals(finalGate))
-                .findFirst()
-                .ifPresent(g -> {
-                    g.setAvailable(false);
-                    gateRepository.save(g);
-                });
-            gateMarked = true;
-        }
+                final String id = excludeCrewId;
 
-        // Generate revised proposal
-        Map<String, Object> revised = proposeOnly(disruption, flight);
-        revised.put("rejection_reason",   rejectionReason);
-        revised.put("excluded_crew",      excludeCrewId);
-        revised.put("excluded_gate",      excludeGate);
-        revised.put("iteration",          2);
+                crewRepository.findAll().stream()
+                        .filter(c -> c != null
+                                && Objects.equals(c.getCrewId(), id))
+                        .findFirst()
+                        .ifPresent(c -> {
+                            c.setAvailable(false);
+                            crewRepository.save(c);
+                        });
 
-        // Restore temporarily excluded resources
-        if (crewMarked && excludeCrewId != null) {
-            final String finalCrewId = excludeCrewId;
-            crewRepository.findAll().stream()
-                .filter(c -> c.getCrewId().equals(finalCrewId))
-                .findFirst()
-                .ifPresent(c -> {
-                    c.setAvailable(true);
-                    crewRepository.save(c);
-                });
-        }
-        if (gateMarked && excludeGate != null) {
-            final String finalGate = excludeGate;
-            gateRepository.findAll().stream()
-                .filter(g -> g.getGateNumber().equals(finalGate))
-                .findFirst()
-                .ifPresent(g -> {
-                    g.setAvailable(true);
-                    gateRepository.save(g);
-                });
-        }
+                crewMarked = true;
+            }
 
-        log.info("🔄 Revised proposal ready with constraints applied");
-        return revised;
+            if (excludeGate != null) {
+
+                final String gateNumber = excludeGate;
+
+                gateRepository.findAll().stream()
+                        .filter(g -> g != null
+                                && Objects.equals(
+                                g.getGateNumber(), gateNumber))
+                        .findFirst()
+                        .ifPresent(g -> {
+                            g.setAvailable(false);
+                            gateRepository.save(g);
+                        });
+
+                gateMarked = true;
+            }
+
+            Map<String, Object> revised =
+                    proposeOnly(disruption, flight);
+
+            revised.put("rejection_reason", rejectionReason);
+            revised.put("excluded_crew", excludeCrewId);
+            revised.put("excluded_gate", excludeGate);
+            revised.put("iteration", 2);
+
+            return revised;
+
+        } finally {
+
+            // Restore temporarily excluded crew
+            if (crewMarked && excludeCrewId != null) {
+
+                final String id = excludeCrewId;
+
+                crewRepository.findAll().stream()
+                        .filter(c -> c != null
+                                && Objects.equals(c.getCrewId(), id))
+                        .findFirst()
+                        .ifPresent(c -> {
+                            c.setAvailable(true);
+                            crewRepository.save(c);
+                        });
+            }
+
+            // Restore temporarily excluded gate
+            if (gateMarked && excludeGate != null) {
+
+                final String gateNumber = excludeGate;
+
+                gateRepository.findAll().stream()
+                        .filter(g -> g != null
+                                && Objects.equals(
+                                g.getGateNumber(), gateNumber))
+                        .findFirst()
+                        .ifPresent(g -> {
+                            g.setAvailable(true);
+                            gateRepository.save(g);
+                        });
+            }
+        }
     }
 }
