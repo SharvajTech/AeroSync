@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { DEPENDENCY_TYPES, type DependencyType } from '../api/types';
-import { AI101, AI202, AI505, E6100, affectedResponse, networkResponse } from '../test/fixtures';
+import { DEPENDENCY_TYPES, type DependencyType, type GraphResponse } from '../api/types';
+import { AI101, AI202, AI505, E6100, affectedResponse, flight, networkResponse } from '../test/fixtures';
 import {
   airportMovements,
   buildFlightGraph,
   buildRouteSummary,
+  dataSources,
   dependencyCounts,
+  disruptedFlights,
+  hasOpenDisruption,
   neighbourhood,
   traversalRoles,
 } from './model';
@@ -128,5 +131,88 @@ describe('dependencyCounts and airportMovements', () => {
     const { departures, arrivals } = airportMovements(networkResponse(), 'BLR');
     expect(departures.map((f) => f.flight_number).sort()).toEqual(['AI202', 'AI505']);
     expect(arrivals.map((f) => f.flight_number)).toEqual(['AI101']);
+  });
+});
+
+// ── Stage 4: live data, provenance and disruptions in the graph ─────────────
+
+describe('live data in the graph', () => {
+  const OPEN = {
+    disruption_id: 41,
+    disruption_type: 'WEATHER_DELAY' as const,
+    status: 'DETECTED' as const,
+    severity: 'HIGH' as const,
+    confidence: 0.85,
+    detection_rule: 'WEATHER_OBSERVED',
+    delay_minutes: 90,
+    detected_at: '2026-11-09T06:00:00',
+  };
+
+  function withStage4(): GraphResponse {
+    const base = networkResponse();
+    return {
+      ...base,
+      data_mode: 'HYBRID',
+      data_sources: ['SYNTHETIC_GENERATOR', 'OPENSKY'],
+      nodes: base.nodes.map((node) => {
+        if (node.type !== 'FLIGHT') return node;
+        if (node.id === AI101.id) return { ...node, disruption: OPEN };
+        if (node.id === AI202.id) return { ...node, disruption: { ...OPEN, disruption_id: 42, severity: 'CRITICAL' as const } };
+        if (node.id === AI505.id) return { ...node, disruption: { ...OPEN, disruption_id: 43, status: 'RESOLVED' as const } };
+        if (node.id === E6100.id) {
+          return { ...node, data_origin: 'IMPORTED' as const, provenance: { data_source: 'OPENSKY', schedule_basis: 'OBSERVED' as const, callsign: 'IGO100' } };
+        }
+        return node;
+      }),
+    };
+  }
+
+  it('marks flights with an open disruption and flights from an external source', () => {
+    const graph = buildFlightGraph(withStage4(), { dependencyTypes: ALL_TYPES });
+    const node = (id: string) => graph.nodes.find((n) => n.id === id)!;
+    expect(node(AI101.id).disrupted).toBe(true);
+    expect(node(AI202.id).disrupted).toBe(true);
+    // A resolved disruption no longer highlights the flight.
+    expect(node(AI505.id).disrupted).toBeUndefined();
+    expect(node(E6100.id).external).toBe(true);
+    expect(node(AI101.id).external).toBeUndefined();
+  });
+
+  it('leaves synthetic flights without Stage 4 fields unmarked', () => {
+    const graph = buildFlightGraph(networkResponse(), { dependencyTypes: ALL_TYPES });
+    expect(graph.nodes.filter((n) => n.disrupted || n.external)).toHaveLength(0);
+    expect(disruptedFlights(networkResponse())).toHaveLength(0);
+    expect(dataSources(networkResponse())).toEqual([]);
+  });
+
+  it('lists disrupted flights most severe first', () => {
+    expect(disruptedFlights(withStage4()).map((f) => f.flight_number)).toEqual(['AI202', 'AI101']);
+    expect(disruptedFlights(undefined)).toEqual([]);
+    expect(hasOpenDisruption(AI101)).toBe(false);
+  });
+
+  it('reports the data sources of a response, from the response or from its flights', () => {
+    expect(dataSources(withStage4())).toEqual(['OPENSKY', 'SYNTHETIC_GENERATOR']);
+    const withoutList = { ...withStage4(), data_sources: undefined };
+    expect(dataSources(withoutList)).toEqual(['OPENSKY']);
+    expect(dataSources(undefined)).toEqual([]);
+  });
+
+  it('changes the drawn graph when a refreshed response arrives', () => {
+    const before = buildFlightGraph(networkResponse(), { dependencyTypes: ALL_TYPES });
+    const refreshed = withStage4();
+    // The refresh also brought a status change and a flight that was not there before.
+    refreshed.nodes = refreshed.nodes.map((node) =>
+      node.type === 'FLIGHT' && node.id === AI101.id ? { ...node, status: 'DELAYED' as const, delay_minutes: 90 } : node);
+    const added = { ...flight('6E777', 'BOM', 'DEL', '11:00', '13:05', { airline: '6E' }), data_origin: 'IMPORTED' as const };
+    refreshed.nodes = [...refreshed.nodes, added];
+    const after = buildFlightGraph(refreshed, { dependencyTypes: ALL_TYPES });
+
+    const tone = (graph: typeof before, id: string) => graph.nodes.find((n) => n.id === id)?.tone;
+    expect(tone(before, AI101.id)).toBe('normal');
+    expect(tone(after, AI101.id)).toBe('warning');
+    expect(before.nodes.some((n) => n.id === added.id)).toBe(false);
+    expect(after.nodes.find((n) => n.id === added.id)?.external).toBe(true);
+    expect(after.nodes.filter((n) => n.kind === 'flight')).toHaveLength(5);
   });
 });

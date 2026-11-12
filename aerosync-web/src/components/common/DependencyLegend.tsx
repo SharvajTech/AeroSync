@@ -17,6 +17,12 @@ export function GraphLegend({ detailed = false }: { detailed?: boolean }) {
     <ul className="legend" aria-label="Graph legend">
       <li><span className="legend__dot" style={{ background: GRAPH_COLORS.airport }} /> Airport</li>
       <li><span className="legend__dot legend__dot--small" style={{ background: GRAPH_COLORS.flight }} /> Flight</li>
+      <li title="A flight from an external source (for example OpenSky), not from the synthetic generator">
+        <span className="legend__dot legend__dot--small legend__dot--external" style={{ background: GRAPH_COLORS.flight, borderColor: GRAPH_COLORS.external }} /> External
+      </li>
+      <li title="A flight with an open disruption">
+        <span className="legend__dot legend__dot--small legend__dot--ring" style={{ background: GRAPH_COLORS.flight, borderColor: GRAPH_COLORS.critical }} /> Disrupted
+      </li>
       <li title="Airport → Flight (departs from) and Flight → Airport (arrives at)">
         <LineSample color={GRAPH_COLORS.route} /> Route
       </li>

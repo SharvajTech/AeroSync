@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { LuArrowLeft } from 'react-icons/lu';
 import { DEPENDENCY_TYPES, type DependencyType, type GraphResponse } from '../api/types';
 import { NetworkGraph } from '../graph/NetworkGraph';
-import { airportNodes, buildFlightGraph, buildRouteSummary, flightNodes, type VisualGraph } from '../graph/model';
+import {
+  airportNodes,
+  buildFlightGraph,
+  buildRouteSummary,
+  dataSources,
+  disruptedFlights,
+  flightNodes,
+  type VisualGraph,
+} from '../graph/model';
 import type { Resource } from '../hooks/useResource';
 import { useAirport } from '../state/AirportContext';
 import { useOperatingDate } from '../state/OperatingDate';
@@ -15,7 +23,8 @@ import {
   type Selection,
 } from '../state/selection';
 import { ALL_DAY, TIME_WINDOWS, windowContaining, windowKey, windowLabel, type TimeWindow } from '../utils/filters';
-import { dependencyShortLabel, formatDateLong, nowInZone, pluralize } from '../utils/format';
+import { dependencyShortLabel, formatDateLong, nowInZone, pluralize, titleCase } from '../utils/format';
+import { clockTime, sourceLabel } from '../utils/liveData';
 import { Card } from './common/Card';
 import { GraphLegend } from './common/DependencyLegend';
 import { EmptyState, ErrorState, LoadingState } from './common/States';
@@ -54,7 +63,7 @@ function scopeTitle(scope: GraphScope, data: GraphResponse | undefined, date: st
 }
 
 export function GraphPanel({ scope, onScopeChange, selection, onSelect, view: data, variant = 'dashboard' }: GraphPanelProps) {
-  const { date, setDate, dataWindow } = useOperatingDate();
+  const { date, setDate, dataWindow, networkRefreshedAt, networkRefreshError } = useOperatingDate();
   const { airport } = useAirport();
   const home = airport.iata_code;
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(() => defaultWindow(date));
@@ -87,6 +96,8 @@ export function GraphPanel({ scope, onScopeChange, selection, onSelect, view: da
       return next;
     });
 
+  const sources = useMemo(() => dataSources(data.data), [data.data]);
+  const disrupted = useMemo(() => disruptedFlights(data.data), [data.data]);
   const totalFlights = flightNodes(data.data).length;
   const visibleFlights = graph ? graph.nodes.filter((n) => n.kind === 'flight').length : 0;
   const fitKey = `${scopeKey(scope)}|${date}|${windowKey(timeWindow)}|${connected}`;
@@ -94,7 +105,7 @@ export function GraphPanel({ scope, onScopeChange, selection, onSelect, view: da
   let body;
   if (data.loading && !data.data) {
     body = <LoadingState label="Loading network graph…" />;
-  } else if (data.error) {
+  } else if (data.error && !data.data) {
     body = <ErrorState error={data.error} onRetry={data.reload} />;
   } else if (!data.data || !graph) {
     body = <LoadingState label="Loading network graph…" />;
@@ -225,7 +236,37 @@ export function GraphPanel({ scope, onScopeChange, selection, onSelect, view: da
                 (usesWindow && !allDay ? ` (${windowLabel(timeWindow)})` : '') +
                 ` · ${pluralize(graph.edges.filter((e) => e.category === 'DEPENDENCY').length, 'dependency', 'dependencies')}`}
           </span>
-          {data.data.synthetic_data && <span className="badge badge--neutral" title={data.data.data_notice}>Synthetic data</span>}
+          <span className="graph-card__provenance">
+            {disrupted.length > 0 && (
+              <span className="badge badge--danger" data-testid="graph-disruptions" title={disrupted.map((f) => `${f.flight_number}: ${titleCase(f.disruption?.disruption_type ?? '')}`).join('\n')}>
+                {pluralize(disrupted.length, 'active disruption')}
+              </span>
+            )}
+            {sources.map((source) => (
+              <span
+                key={source}
+                className={`badge badge--${source === 'SYNTHETIC_GENERATOR' ? 'neutral' : source === 'MANUAL_ENTRY' ? 'info' : 'success'}`}
+                title={source === 'SYNTHETIC_GENERATOR' ? data.data?.data_notice ?? 'Generated demonstration data' : `Flights from ${sourceLabel(source)}`}
+                data-testid={`graph-source-${source}`}
+              >
+                {source === 'SYNTHETIC_GENERATOR' ? 'Synthetic data' : sourceLabel(source)}
+              </span>
+            ))}
+            {sources.length === 0 && data.data.synthetic_data && (
+              <span className="badge badge--neutral" title={data.data.data_notice}>Synthetic data</span>
+            )}
+            {scope.kind === 'network' && (
+              networkRefreshError ? (
+                <span className="text-warning" data-testid="graph-stale" title="The last refresh failed; the graph shows the last data received.">
+                  Not refreshed since {clockTime(networkRefreshedAt)}
+                </span>
+              ) : (
+                <span className="text-muted" data-testid="graph-refreshed" title="The graph refreshes every two minutes">
+                  Updated {clockTime(networkRefreshedAt)}
+                </span>
+              )
+            )}
+          </span>
         </div>
       )}
     </Card>

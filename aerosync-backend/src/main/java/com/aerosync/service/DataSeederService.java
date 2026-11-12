@@ -1,5 +1,6 @@
 package com.aerosync.service;
 
+import com.aerosync.datasource.DataSourcePolicy;
 import com.aerosync.model.*;
 import com.aerosync.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -18,13 +19,17 @@ public class DataSeederService implements CommandLineRunner {
     private final GateRepository       gateRepository;
     private final CrewRepository       crewRepository;
     private final ScheduleGeneratorService scheduleGeneratorService;
+    private final DataSourcePolicy dataSourcePolicy;
 
     @Override
     public void run(String... args) {
         seedGates();
         seedCrew();
-        // Use schedule generator instead of hardcoded flights
-        if (flightRepository.count() == 0) {
+        // Use schedule generator instead of hardcoded flights.
+        // Stage 4: the generated schedule is synthetic, so LIVE mode does not create it.
+        if (!dataSourcePolicy.mode().generatesSyntheticData()) {
+            log.info("event=synthetic_schedule_skipped data_mode={}", dataSourcePolicy.mode());
+        } else if (flightRepository.count() == 0) {
             scheduleGeneratorService.generateDailySchedule();
         }
         log.info("✅ Airport data initialized");

@@ -3,6 +3,7 @@ import { AuthProvider, resolveScreen, useAuth } from './auth/AuthContext';
 import type { AuthStore } from './auth/authStore';
 import type { KeyValueStorage } from './auth/session';
 import { Sidebar } from './components/layout/Sidebar';
+import { DataStatusBar } from './components/status/DataStatusBar';
 import { TopBar } from './components/layout/TopBar';
 import { useBackendStatus, type BackendStatus } from './hooks/useBackendStatus';
 import { formatHash, useHashRoute } from './hooks/useHashRoute';
@@ -15,6 +16,7 @@ import { OperationsPage } from './pages/OperationsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AirportProvider, useAirport } from './state/AirportContext';
 import { OperatingDateProvider, useOperatingDate } from './state/OperatingDate';
+import { SystemStatusProvider } from './state/SystemStatus';
 
 function Shell({ status, expiresAt, onLogout }: { status: BackendStatus; expiresAt: string | null; onLogout: () => void }) {
   const [route, navigate] = useHashRoute();
@@ -57,6 +59,7 @@ function Shell({ status, expiresAt, onLogout }: { status: BackendStatus; expires
           expiresAt={expiresAt}
           onLogout={onLogout}
         />
+        <DataStatusBar />
         {/* Keyed by airport: switching airports remounts the page, so no graph,
             selection or filter state of the previous airport survives. */}
         <main className="page" key={`${route.name}:${airport.iata_code}`}>{page}</main>
@@ -85,7 +88,9 @@ export function Root({ storage }: { storage: KeyValueStorage }) {
   return (
     <AirportProvider key={user.user_id} user={user} storage={storage}>
       <OperatingDateProvider>
-        <Shell status={status} expiresAt={expiresAt} onLogout={logout} />
+        <SystemStatusProvider>
+          <Shell status={status} expiresAt={expiresAt} onLogout={logout} />
+        </SystemStatusProvider>
       </OperatingDateProvider>
     </AirportProvider>
   );

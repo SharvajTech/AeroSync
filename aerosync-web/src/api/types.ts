@@ -28,6 +28,36 @@ export type FlightStatus =
   | 'DIVERTED';
 export type DataOrigin = 'SYNTHETIC' | 'IMPORTED' | 'MANUAL';
 export type GateStatus = 'OPEN' | 'CLOSED' | 'MAINTENANCE';
+/** Stage 4: which records the backend produces and serves. */
+export type DataMode = 'SYNTHETIC' | 'LIVE' | 'HYBRID';
+/** PLANNED: scheduled times are a timetable. OBSERVED: no timetable; they are observed times. */
+export type ScheduleBasis = 'PLANNED' | 'OBSERVED';
+
+/** Where a flight record came from (Stage 4). */
+export interface FlightProvenance {
+  /** System that wrote the record: SYNTHETIC_GENERATOR, MANUAL_ENTRY, OPENSKY, ... */
+  data_source: string;
+  schedule_basis: ScheduleBasis;
+  source_record_id?: string;
+  callsign?: string;
+  aircraft_icao24?: string;
+  ingested_at?: string;
+  source_updated_at?: string;
+}
+
+export type DisruptionSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+/** The open disruption of a flight node (Stage 4), for highlighting in the graph. */
+export interface FlightDisruptionInfo {
+  disruption_id: number;
+  disruption_type: DisruptionType;
+  status: DisruptionStatus;
+  severity: DisruptionSeverity | null;
+  confidence: number | null;
+  detection_rule: string | null;
+  delay_minutes: number | null;
+  detected_at: string | null;
+}
 
 export const DEPENDENCY_TYPES: readonly DependencyType[] = [
   'AIRCRAFT_ROTATION',
@@ -78,6 +108,8 @@ export interface FlightNode {
   aircraft: AircraftInfo;
   assigned_gate: string | null;
   data_origin: DataOrigin | null;
+  provenance?: FlightProvenance | null;
+  disruption?: FlightDisruptionInfo | null;
 }
 
 export type GraphNode = AirportNode | FlightNode;
@@ -143,6 +175,9 @@ export interface GraphResponse {
   summary: GraphSummary;
   nodes: GraphNode[];
   edges: GraphEdge[];
+  /** Stage 4: the backend's data mode and the sources of the flights in this response. */
+  data_mode?: DataMode;
+  data_sources?: string[];
 }
 
 export interface AirportSummary {
@@ -174,6 +209,7 @@ export interface FlightMovement {
   aircraft_type: string | null;
   assigned_gate: string | null;
   data_origin: DataOrigin | null;
+  provenance?: FlightProvenance | null;
 }
 
 export interface GateInfo {
@@ -208,6 +244,7 @@ export interface AirportOperations {
   departures: FlightMovement[];
   arrivals: FlightMovement[];
   gates: GateInfo[];
+  data_mode?: DataMode;
 }
 
 /** Error body returned by the backend: {"error": "...", "status": 403, "code": "forbidden"}. */
@@ -244,7 +281,17 @@ export interface LoginResponse {
 
 // ── Stage 3: legacy operations endpoints used by the disruptions panel ─────
 
-export type DisruptionType = 'WEATHER_DELAY' | 'CREW_TIMEOUT' | 'AIRCRAFT_FAULT' | 'GATE_CONFLICT' | 'CASCADING_DELAY';
+export type DisruptionType =
+  | 'WEATHER_DELAY'
+  | 'CREW_TIMEOUT'
+  | 'AIRCRAFT_FAULT'
+  | 'GATE_CONFLICT'
+  | 'CASCADING_DELAY'
+  // Stage 4: raised by the disruption monitor
+  | 'FLIGHT_DELAY'
+  | 'TURNAROUND_CONFLICT'
+  | 'MISSED_CONNECTION'
+  | 'AIRCRAFT_UNAVAILABLE';
 export type DisruptionStatus = 'DETECTED' | 'RESOLVING' | 'RESOLVED' | 'FAILED' | 'PROPOSED';
 
 export const DISRUPTION_TYPES: DisruptionType[] = [
@@ -267,6 +314,29 @@ export interface Disruption {
   cost_impact: number | null;
   detected_at: string | null;
   resolved_at: string | null;
+  // Stage 4 (absent on disruptions recorded before it)
+  severity?: DisruptionSeverity | null;
+  /** 0..1: how sure the detection is. */
+  confidence?: number | null;
+  /** MANUAL, SIMULATION, SYSTEM or MONITOR. */
+  detection_source?: string | null;
+  /** Monitoring rule, for example WEATHER_OBSERVED. */
+  detection_rule?: string | null;
+  data_origin?: DataOrigin | null;
+  origin_airport?: string | null;
+  destination_airport?: string | null;
+  /** Set for operational-network flights; those disruptions are advisory. */
+  flight_instance_id?: string | null;
+  last_observed_at?: string | null;
+  proposed_at?: string | null;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  rejected_at?: string | null;
+  rejected_by?: string | null;
+  rejection_count?: number | null;
+  resolution_note?: string | null;
+  /** False for advisory disruptions: there is nothing to propose or approve. */
+  actionable?: boolean;
 }
 
 /** GET /api/flights (com.aerosync.model.Flight, the legacy operations flight). */
@@ -322,4 +392,135 @@ export function isAirportNode(node: GraphNode): node is AirportNode {
 
 export function isFlightNode(node: GraphNode): node is FlightNode {
   return node.type === 'FLIGHT';
+}
+
+// ── Stage 4: pipeline status, live aircraft, weather ────────────────────────
+
+export type FeedStatus = 'LIVE' | 'STALE' | 'FAILING' | 'RATE_LIMITED' | 'WAITING' | 'DISABLED' | 'UNCONFIGURED';
+
+export interface ComponentStatus {
+  status: 'UP' | 'DOWN';
+  checked_at?: string;
+  detail?: string;
+}
+
+export interface FeedRun {
+  status: string;
+  started_at: string;
+  finished_at?: string;
+  records_fetched: number;
+  records_inserted: number;
+  records_updated: number;
+  records_unchanged: number;
+  records_skipped: number;
+  api_calls: number;
+  skip_details?: string;
+}
+
+export interface FeedInfo {
+  feed: string;
+  data_source: string;
+  description: string;
+  status: FeedStatus;
+  enabled: boolean;
+  authenticated?: boolean;
+  last_success_at?: string;
+  last_attempt_at?: string;
+  last_error?: string;
+  interval_seconds?: number;
+  next_attempt_at?: string;
+  consecutive_failures?: number;
+  rate_limit_remaining?: number;
+  last_run?: FeedRun;
+}
+
+export interface MonitoringInfo {
+  status: 'RUNNING' | 'WAITING' | 'FAILING' | 'STALE' | 'DISABLED';
+  enabled: boolean;
+  last_run_at?: string;
+  interval_seconds?: number;
+  detected?: number;
+  opened?: number;
+  refreshed?: number;
+  suppressed?: number;
+  cleared?: number;
+  last_error?: string;
+}
+
+/** GET /api/system/status */
+export interface SystemStatus {
+  generated_at: string;
+  data_mode: DataMode;
+  data_mode_description: string;
+  database: ComponentStatus;
+  ml_service: ComponentStatus;
+  feeds: FeedInfo[];
+  monitoring: MonitoringInfo;
+}
+
+export type AircraftPhase = 'ON_GROUND' | 'AIRBORNE' | 'CLIMBING' | 'DESCENDING' | 'LEVEL';
+
+export interface LiveAircraft {
+  icao24: string;
+  callsign?: string;
+  /** Derived from the callsign; absent when the callsign is not a flight number. */
+  flight_number?: string;
+  operating_airline?: string;
+  origin_country?: string;
+  latitude: number;
+  longitude: number;
+  baro_altitude_m?: number;
+  geo_altitude_m?: number;
+  on_ground: boolean;
+  velocity_ms?: number;
+  true_track_deg?: number;
+  vertical_rate_ms?: number;
+  phase: AircraftPhase;
+  distance_km?: number;
+  last_contact: string;
+  age_seconds: number;
+  stale: boolean;
+  data_source: string;
+}
+
+/** GET /api/airports/{iata}/live-aircraft */
+export interface AirportLiveTraffic {
+  airport: string;
+  status: 'LIVE' | 'STALE' | 'DISABLED' | 'NO_DATA';
+  data_source: string;
+  radius_km: number;
+  last_success_at?: string;
+  generated_at: string;
+  on_ground: number;
+  airborne: number;
+  aircraft: LiveAircraft[];
+  note?: string;
+}
+
+export interface WeatherReport {
+  kind: 'OBSERVATION' | 'FORECAST';
+  /** Observation time, or the time a forecast applies to. */
+  valid_at: string;
+  fetched_at: string;
+  severity_score: number;
+  severity_label: string;
+  condition_code?: number;
+  description?: string;
+  wind_speed_ms?: number;
+  visibility_m?: number;
+  temperature_c?: number;
+  precipitation_mm?: number;
+  precipitation_probability?: number;
+  data_source: string;
+}
+
+/** GET /api/airports/{iata}/weather */
+export interface AirportWeather {
+  airport: string;
+  status: 'LIVE' | 'STALE' | 'UNAVAILABLE';
+  source_configured: boolean;
+  observation?: WeatherReport;
+  observation_age_minutes?: number;
+  forecast?: WeatherReport[];
+  note?: string;
 }

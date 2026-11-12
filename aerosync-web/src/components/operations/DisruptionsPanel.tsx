@@ -1,9 +1,20 @@
-import { useMemo, useState, type FormEvent } from 'react';
-import { LuCircleCheck, LuCircleX, LuPlus, LuSparkles } from 'react-icons/lu';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { LuCircleCheck, LuCircleX, LuPlus, LuRefreshCw, LuSparkles } from 'react-icons/lu';
 import { api, keys } from '../../api/endpoints';
 import { DISRUPTION_TYPES, type Disruption, type DisruptionType, type ResolutionProposal, type ResolutionSection } from '../../api/types';
 import { useResource } from '../../hooks/useResource';
 import { titleCase } from '../../utils/format';
+import {
+  ago,
+  clockTime,
+  confidencePercent,
+  detectionSourceLabel,
+  isAdvisory,
+  isNewDetection,
+  originLabel,
+  originTone,
+  severityTone,
+} from '../../utils/liveData';
 import { Card } from '../common/Card';
 import { StatusBadge } from '../common/StatusBadge';
 import { EmptyState, ErrorState, LoadingState } from '../common/States';
@@ -23,6 +34,32 @@ export function sortDisruptions(rows: Disruption[]): Disruption[] {
   return [...rows].sort((a, b) => open(a) - open(b) || (b.detected_at ?? '').localeCompare(a.detected_at ?? '') || b.id - a.id);
 }
 
+export interface DisruptionRoute {
+  origin: string;
+  destination: string | null;
+}
+
+/**
+ * Route of a disruption's flight: the airports stored on the disruption
+ * (Stage 4), else the flight from the operations list.
+ */
+export function disruptionRoute(row: Disruption, flights: Map<string, DisruptionRoute>): DisruptionRoute | undefined {
+  if (row.origin_airport) return { origin: row.origin_airport, destination: row.destination_airport ?? null };
+  return flights.get(row.flight_id);
+}
+
+/**
+ * Whether the resolution workflow is offered for a row. The backend decides
+ * again on every request; this only hides buttons that could never succeed:
+ * read-only roles, flights departing elsewhere, closed and advisory disruptions.
+ */
+export function canActOn(row: Disruption, route: DisruptionRoute | undefined, airport: string, canOperate: boolean): boolean {
+  return canOperate && route?.origin === airport && row.status !== 'RESOLVED' && !isAdvisory(row);
+}
+
+/** How often the list refreshes by itself so newly detected disruptions appear. */
+export const DISRUPTIONS_REFRESH_MS = 60_000;
+
 const SECTIONS: { key: keyof ResolutionProposal; label: string }[] = [
   { key: 'gate_resolution', label: 'Gate' },
   { key: 'crew_resolution', label: 'Crew' },
@@ -41,7 +78,12 @@ interface Feedback {
  * Every action is authorized by the backend again; buttons are only hidden
  * for read-only roles and for flights operated by another airport.
  */
-export function DisruptionsPanel({ airport, canOperate }: { airport: string; canOperate: boolean }) {
+export function DisruptionsPanel({ airport, canOperate, onViewFlight }: {
+  airport: string;
+  canOperate: boolean;
+  /** Opens an operational-network flight in the graph (advisory disruptions). */
+  onViewFlight?: (flightInstanceId: string) => void;
+}) {
   const disruptions = useResource(keys.disruptions(airport), () => api.disruptions(airport));
   const flights = useResource(keys.operationsFlights(airport), () => api.operationsFlights(airport));
   const [openId, setOpenId] = useState<number | null>(null);
@@ -52,8 +94,28 @@ export function DisruptionsPanel({ airport, canOperate }: { airport: string; can
   const [rejectReason, setRejectReason] = useState('');
   const [reporting, setReporting] = useState(false);
 
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+
+  // Remember when the list was last loaded, to show how fresh it is.
+  useEffect(() => {
+    if (disruptions.data) setUpdatedAt(new Date());
+  }, [disruptions.data]);
+
+  // Refresh periodically so disruptions the monitor detects appear without a reload.
+  // Paused while a proposal is open or an action runs, so the review is not disturbed.
+  const idle = openId === null && busy === null && !reporting;
+  const reloadRef = useRef(disruptions.reload);
+  reloadRef.current = disruptions.reload;
+  useEffect(() => {
+    if (!idle) return undefined;
+    const timer = window.setInterval(() => {
+      if (!document.hidden) reloadRef.current();
+    }, DISRUPTIONS_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [idle]);
+
   const routes = useMemo(() => {
-    const map = new Map<string, { origin: string; destination: string }>();
+    const map = new Map<string, DisruptionRoute>();
     (flights.data ?? []).forEach((f) => map.set(f.flight_id, { origin: f.origin, destination: f.destination }));
     return map;
   }, [flights.data]);
@@ -129,23 +191,28 @@ export function DisruptionsPanel({ airport, canOperate }: { airport: string; can
               <th>Flight</th>
               <th>Route</th>
               <th>Type</th>
+              <th title="Severity, and how sure the detection is">Severity</th>
               <th>Delay</th>
+              <th title="Who raised it and when">Detected</th>
               <th>Status</th>
               <th aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => {
-              const route = routes.get(row.flight_id);
+              const route = disruptionRoute(row, routes);
               const ownDeparture = route?.origin === airport;
-              const actionable = canOperate && ownDeparture && row.status !== 'RESOLVED';
+              const advisory = isAdvisory(row);
               return (
                 <DisruptionRow
                   key={row.id}
                   row={row}
                   route={route}
-                  actionable={actionable}
-                  hint={!ownDeparture && route ? `Handled by ${route.origin}` : null}
+                  actionable={canActOn(row, route, airport, canOperate)}
+                  hint={advisory ? 'Advisory' : !ownDeparture && route ? `Handled by ${route.origin}` : null}
+                  onViewFlight={advisory && row.flight_instance_id && onViewFlight
+                    ? () => onViewFlight(row.flight_instance_id as string)
+                    : undefined}
                   open={openId === row.id}
                   busy={busy}
                   proposal={openId === row.id ? proposal : null}
@@ -172,11 +239,19 @@ export function DisruptionsPanel({ airport, canOperate }: { airport: string; can
       title="Disruptions"
       className="disruptions"
       actions={
-        canOperate ? (
-          <button type="button" className="button button--outline button--small" onClick={() => setReporting((v) => !v)} aria-expanded={reporting}>
-            <LuPlus aria-hidden /> Report disruption
+        <>
+          <span className="details__muted" data-testid="disruptions-updated" title="The list refreshes every minute">
+            Updated {clockTime(updatedAt)}
+          </span>
+          <button type="button" className="icon-button icon-button--small" onClick={refresh} aria-label="Refresh disruptions" title="Refresh now">
+            <LuRefreshCw aria-hidden />
           </button>
-        ) : undefined
+          {canOperate && (
+            <button type="button" className="button button--outline button--small" onClick={() => setReporting((v) => !v)} aria-expanded={reporting}>
+              <LuPlus aria-hidden /> Report disruption
+            </button>
+          )}
+        </>
       }
     >
       {!canOperate && (
@@ -207,11 +282,42 @@ export function DisruptionsPanel({ airport, canOperate }: { airport: string; can
   );
 }
 
-function DisruptionRow({ row, route, actionable, hint, open, busy, proposal, rejectReason, onRejectReason, onPropose, onApprove, onReject, onClose }: {
+/** Type, severity, source and time cells of a row; also used on its own in tests. */
+export function DisruptionSummaryCells({ row, now }: { row: Disruption; now: Date }) {
+  return (
+    <>
+      <td>
+        {titleCase(row.type)}
+        {row.description && <div className="details__muted disruption__description">{row.description}</div>}
+      </td>
+      <td>
+        {row.severity ? (
+          <StatusBadge tone={severityTone(row.severity)}>{titleCase(row.severity)}</StatusBadge>
+        ) : (
+          <span className="text-muted">—</span>
+        )}
+        {row.confidence != null && (
+          <div className="details__muted" title="How sure the detection is">{confidencePercent(row.confidence)} confidence</div>
+        )}
+      </td>
+      <td>{row.delay_minutes != null && row.delay_minutes > 0 ? `${row.delay_minutes} min` : '—'}</td>
+      <td>
+        {detectionSourceLabel(row)}
+        <div className="details__muted" title={row.detected_at ?? undefined}>
+          {row.detected_at ? ago(row.detected_at, now) : 'time not recorded'}
+          {isNewDetection(row, now) && <span className="badge badge--info disruption__new" data-testid="new-detection">New</span>}
+        </div>
+      </td>
+    </>
+  );
+}
+
+function DisruptionRow({ row, route, actionable, hint, onViewFlight, open, busy, proposal, rejectReason, onRejectReason, onPropose, onApprove, onReject, onClose }: {
   row: Disruption;
-  route: { origin: string; destination: string } | undefined;
+  route: DisruptionRoute | undefined;
   actionable: boolean;
   hint: string | null;
+  onViewFlight?: () => void;
   open: boolean;
   busy: string | null;
   proposal: ResolutionProposal | null;
@@ -225,24 +331,43 @@ function DisruptionRow({ row, route, actionable, hint, open, busy, proposal, rej
   return (
     <>
       <tr className={open ? 'is-selected' : undefined}>
-        <td className="table__strong">{row.flight_id}</td>
-        <td>{route ? `${route.origin} → ${route.destination}` : '—'}</td>
-        <td>{titleCase(row.type)}</td>
-        <td>{row.delay_minutes != null ? `${row.delay_minutes} min` : '—'}</td>
-        <td><StatusBadge tone={disruptionTone(row.status)}>{titleCase(row.status)}</StatusBadge></td>
+        <td className="table__strong">
+          {row.flight_id}
+          {row.data_origin && (
+            <div>
+              <StatusBadge tone={originTone(row.data_origin)} title="Where the flight's data comes from">
+                {originLabel(row.data_origin)}
+              </StatusBadge>
+            </div>
+          )}
+        </td>
+        <td>{route ? `${route.origin} → ${route.destination ?? '—'}` : '—'}</td>
+        <DisruptionSummaryCells row={row} now={new Date()} />
+        <td>
+          <StatusBadge tone={disruptionTone(row.status)}>{titleCase(row.status)}</StatusBadge>
+          {row.resolution_note && <div className="details__muted">{row.resolution_note}</div>}
+          {row.approved_by && <div className="details__muted">Approved by {row.approved_by}</div>}
+        </td>
         <td className="table__actions">
           {actionable ? (
             <button type="button" className="button button--outline button--small" onClick={onPropose} disabled={busy !== null}>
               <LuSparkles aria-hidden /> {busy === `propose:${row.id}` ? 'Proposing…' : 'Propose resolution'}
             </button>
           ) : hint ? (
-            <span className="details__muted">{hint}</span>
+            <span className="details__muted" title={hint === 'Advisory' ? 'About a network flight: shown for awareness, there is no resolution to approve' : undefined}>
+              {hint}
+            </span>
           ) : null}
+          {onViewFlight && (
+            <button type="button" className="button button--ghost button--small" onClick={onViewFlight}>
+              View in graph
+            </button>
+          )}
         </td>
       </tr>
       {open && (
         <tr className="proposal-row">
-          <td colSpan={6}>
+          <td colSpan={8}>
             {busy === `propose:${row.id}` && !proposal ? (
               <LoadingState label="Asking the resolution agent…" />
             ) : proposal ? (

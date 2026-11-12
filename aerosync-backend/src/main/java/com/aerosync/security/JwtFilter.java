@@ -33,7 +33,7 @@ public class JwtFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger(JwtFilter.class);
 
     /** Exact paths that never need a token. */
-    static final Set<String> PUBLIC_PATHS = Set.of("/api/auth/login", "/api/health");
+    static final Set<String> PUBLIC_PATHS = Set.of("/api/auth/login", "/api/health", "/api/health/ready");
 
     private final JwtUtil jwtUtil;
     private final PrincipalLookup principals;

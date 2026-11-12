@@ -4,6 +4,7 @@ import com.aerosync.model.Disruption;
 import com.aerosync.security.AuthenticatedUser;
 import com.aerosync.service.AgentService;
 import com.aerosync.service.DisruptionAccessService;
+import com.aerosync.service.DisruptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -23,13 +24,16 @@ public class AgentController {
 
     private final AgentService agentService;
     private final DisruptionAccessService disruptionAccess;
+    private final DisruptionService disruptionService;
 
     // Manual constructor — @RequiredArgsConstructor won't work here
     // because we need two beans injected
     public AgentController(AgentService agentService,
-                           DisruptionAccessService disruptionAccess) {
+                           DisruptionAccessService disruptionAccess,
+                           DisruptionService disruptionService) {
         this.agentService          = agentService;
         this.disruptionAccess      = disruptionAccess;
+        this.disruptionService     = disruptionService;
     }
 
     // POST /api/agents/resolve/{disruptionId}
@@ -44,6 +48,7 @@ public class AgentController {
         }
         Map<String, Object> resolution =
                 agentService.resolveDisruption(disruptionId, user.scope());
+        disruptionService.recordApproved(disruptionId, user.username());
         return ResponseEntity.ok(resolution);
     }
 
@@ -69,6 +74,7 @@ public class AgentController {
 
         Map<String, Object> proposal =
             agentService.proposeResolution(disruptionId);
+        disruptionService.recordProposed(disruptionId);
         return ResponseEntity.ok(proposal);
     }
 
@@ -85,6 +91,7 @@ public class AgentController {
         }
         Map<String, Object> result =
             agentService.applyApprovedResolution(disruptionId, approvedResolution, user.scope());
+        disruptionService.recordApproved(disruptionId, user.username());
         return ResponseEntity.ok(result);
     }
 
@@ -103,6 +110,8 @@ public class AgentController {
         }
         Map<String, Object> revised =
             agentService.reReasonWithFeedback(disruptionId, reason);
+        disruptionService.recordRejected(disruptionId, user.username());
+        disruptionService.recordProposed(disruptionId);
         return ResponseEntity.ok(revised);
     }
 

@@ -163,6 +163,35 @@ The change applies to the user's next request.
 | `service/DemoUserSeederTest` | demo account definitions |
 | `network/AirportScopedAccessIntegrationTest` | HTTP end to end with BOM, DEL, BOM+DEL and read-only users: login, invalid credentials, lockout, missing/invalid/expired tokens, revocation, scoped graph and traversal, `airports` manipulation, cross-airport flights, disruptions and resolution actions (403 and database unchanged), multi-airport cascades |
 
+## Stage 4 additions
+
+- `GET /api/airports/{iata}/live-aircraft` and `GET /api/airports/{iata}/weather`
+  check the airport against the token's scope on the backend (400 invalid
+  code, 404 unknown airport, 403 outside the scope); the frontend's airport
+  choice is never trusted.
+- `GET /api/system/status` needs a token and holds no operational data of any
+  airport. `GET /api/health/ready` is public and returns only `UP` or `DOWN`.
+- Disruptions found by the monitor follow the same rules as reported ones:
+  visible when their flight departs from or arrives at one of the user's
+  airports, actionable only for an `OPERATIONS_CONTROLLER` of the departure
+  airport. The monitor itself never proposes, approves or executes.
+  Advisory (network-flight) disruptions answer 409 `not_available` to
+  propose/approve, after the 403 checks.
+- New secrets (`OPENSKY_CLIENT_ID`, `OPENSKY_CLIENT_SECRET`,
+  `WEATHER_API_KEY`) come only from the environment, have no default and
+  are never logged; OpenSky error messages pass through `LogRedaction`.
+- CI (`.github/workflows/ci.yml`) needs no secret: external APIs are mocked.
+  Should a later job need one, store it as a GitHub Actions secret.
+- `aerosync-ml/data/opensky_fetcher.py` contained an OpenSky username and
+  password in earlier commits. They were removed; the password must be
+  treated as exposed (it remains in the Git history) and changed on the
+  OpenSky account.
+
+| Stage 4 test | Covers |
+|--------------|--------|
+| `network/LiveDataAndMonitoringIntegrationTest` | status needs a token, readiness reveals nothing, live aircraft and weather of another airport (403), detected disruptions through propose/approve with viewer and other-airport controller refused, advisory disruptions scoped and not actionable |
+| `network/LiveIngestionIntegrationTest` | imported aircraft and legs are served only to their airports |
+
 ## Limitations
 
 - Tokens cannot be revoked one by one: logout deletes the token in the

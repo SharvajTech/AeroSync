@@ -1,6 +1,9 @@
 package com.aerosync.service;
 
+import com.aerosync.datasource.DataSourcePolicy;
 import com.aerosync.exception.AccessForbiddenException;
+import com.aerosync.exception.OperationNotAvailableException;
+import com.aerosync.model.DataOrigin;
 import com.aerosync.model.Flight;
 import com.aerosync.repository.FlightRepository;
 import com.aerosync.security.AirportScope;
@@ -25,6 +28,7 @@ public class ScheduleGeneratorService {
 
     private final FlightRepository flightRepository;
     private final WeatherService   weatherService;
+    private final DataSourcePolicy dataSourcePolicy;
 
     /**
      * Regenerates the schedule for a user. The generator deletes every legacy
@@ -33,6 +37,7 @@ public class ScheduleGeneratorService {
      * airport that currently has flights (Stage 3).
      */
     public void generateDailySchedule(AirportScope scope) {
+        requireSyntheticData();
         if (!scope.isUnrestricted()) {
             Set<String> affected = new TreeSet<>(ORIGIN_AIRPORTS);
             for (String origin : flightRepository.findDistinctOrigins()) {
@@ -49,7 +54,16 @@ public class ScheduleGeneratorService {
         generateDailySchedule();
     }
 
+    /** Stage 4: the generated schedule is synthetic, so it does not exist in LIVE mode. */
+    private void requireSyntheticData() {
+        if (!dataSourcePolicy.mode().generatesSyntheticData()) {
+            throw new OperationNotAvailableException("The demonstration schedule is synthetic and is not "
+                    + "generated in data mode " + dataSourcePolicy.mode());
+        }
+    }
+
     public void generateDailySchedule() {
+        requireSyntheticData();
         flightRepository.deleteAll();
         log.info("Generating fresh daily schedule...");
 
@@ -228,6 +242,8 @@ public class ScheduleGeneratorService {
                 .createdAt(now).updatedAt(now).build()
         );
 
+        // Everything generated here is demonstration data and is labelled as such.
+        schedule.forEach(flight -> flight.setDataOrigin(DataOrigin.SYNTHETIC));
         flightRepository.saveAll(schedule);
         log.info("✅ Schedule generated — {} flights with "
                + "live weather across BOM, DEL, BLR, HYD",

@@ -1,5 +1,6 @@
 package com.aerosync.service;
 
+import com.aerosync.datasource.DataSourceMode;
 import com.aerosync.model.Aircraft;
 import com.aerosync.model.AircraftStatus;
 import com.aerosync.model.Airport;
@@ -85,6 +86,10 @@ public class SyntheticNetworkSeeder implements ApplicationRunner {
     @Value("${aerosync.operations.timezone:Asia/Kolkata}")
     private String operationsTimezone;
 
+    /** Stage 4: SYNTHETIC, LIVE or HYBRID. Nothing synthetic is seeded in LIVE mode. */
+    @Value("${aerosync.data.mode:SYNTHETIC}")
+    private String dataMode;
+
     /** Outcome of a seeding attempt. */
     public record SeedResult(
             boolean seeded,
@@ -101,6 +106,10 @@ public class SyntheticNetworkSeeder implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         if (!enabled) {
             log.info("Synthetic operational network seeding is disabled");
+            return;
+        }
+        if (!DataSourceMode.parse(dataMode).generatesSyntheticData()) {
+            log.info("event=synthetic_network_skipped data_mode={}", dataMode.trim().toUpperCase());
             return;
         }
         LocalDate start = resolveStartDate();
@@ -147,6 +156,7 @@ public class SyntheticNetworkSeeder implements ApplicationRunner {
                 airport = Airport.builder()
                         .airportId(reference.airportId())
                         .iataCode(reference.iataCode())
+                        .icaoCode(ReferenceAirports.icaoCode(reference.iataCode()))
                         .airportName(reference.airportName())
                         .city(reference.city())
                         .timezone(reference.timezone())

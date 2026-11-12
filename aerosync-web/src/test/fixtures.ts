@@ -183,3 +183,115 @@ export function profile(username: string, airports: string[], role: UserProfile[
 export function loginResponse(username: string, airports: string[], expiresAt = '2099-01-01T00:00:00Z'): LoginResponse {
   return { token: `token-of-${username}`, token_type: 'Bearer', expires_at: expiresAt, user: profile(username, airports) };
 }
+
+// ── Stage 4 fixtures (TEST ONLY) ────────────────────────────────────────────
+
+import type { AirportLiveTraffic, AirportWeather, Disruption, FeedInfo, LiveAircraft, SystemStatus } from '../api/types';
+
+export function feed(name: string, status: FeedInfo['status'], overrides: Partial<FeedInfo> = {}): FeedInfo {
+  return {
+    feed: name,
+    data_source: name === 'WEATHER' ? 'OPENWEATHERMAP' : 'OPENSKY',
+    description: `${name} feed`,
+    status,
+    enabled: status !== 'DISABLED' && status !== 'UNCONFIGURED',
+    ...overrides,
+  };
+}
+
+export function systemStatus(mode: SystemStatus['data_mode'], feeds: FeedInfo[], overrides: Partial<SystemStatus> = {}): SystemStatus {
+  return {
+    generated_at: '2026-11-10T10:00:00Z',
+    data_mode: mode,
+    data_mode_description: `${mode} mode`,
+    database: { status: 'UP' },
+    ml_service: { status: 'UP' },
+    feeds,
+    monitoring: { status: 'RUNNING', enabled: true, last_run_at: '2026-11-10T09:59:00Z', interval_seconds: 120, detected: 2, opened: 1, refreshed: 1, suppressed: 0, cleared: 0 },
+    ...overrides,
+  };
+}
+
+export function liveAircraft(icao24: string, overrides: Partial<LiveAircraft> = {}): LiveAircraft {
+  return {
+    icao24,
+    callsign: 'IGO1454',
+    flight_number: '6E1454',
+    latitude: 19.2,
+    longitude: 72.95,
+    baro_altitude_m: 900,
+    on_ground: false,
+    velocity_ms: 75,
+    vertical_rate_ms: -3,
+    phase: 'DESCENDING',
+    distance_km: 15.2,
+    last_contact: '2026-11-10T09:59:40Z',
+    age_seconds: 20,
+    stale: false,
+    data_source: 'OPENSKY',
+    ...overrides,
+  };
+}
+
+export function liveTraffic(airportCode: string, status: AirportLiveTraffic['status'], aircraft: LiveAircraft[] = [], overrides: Partial<AirportLiveTraffic> = {}): AirportLiveTraffic {
+  const onGround = aircraft.filter((a) => a.on_ground).length;
+  return {
+    airport: airportCode,
+    status,
+    data_source: 'OPENSKY',
+    radius_km: 60,
+    generated_at: '2026-11-10T10:00:00Z',
+    on_ground: onGround,
+    airborne: aircraft.length - onGround,
+    aircraft,
+    ...overrides,
+  };
+}
+
+export function weather(airportCode: string, status: AirportWeather['status'], overrides: Partial<AirportWeather> = {}): AirportWeather {
+  return {
+    airport: airportCode,
+    status,
+    source_configured: status !== 'UNAVAILABLE',
+    observation: status === 'UNAVAILABLE' ? undefined : {
+      kind: 'OBSERVATION',
+      valid_at: '2026-11-10T09:52:00Z',
+      fetched_at: '2026-11-10T09:55:00Z',
+      severity_score: 2,
+      severity_label: 'Moderate: delays likely',
+      description: 'moderate rain',
+      wind_speed_ms: 6,
+      visibility_m: 4000,
+      temperature_c: 27.4,
+      data_source: 'OPENWEATHERMAP',
+    },
+    observation_age_minutes: status === 'UNAVAILABLE' ? undefined : 8,
+    forecast: [],
+    ...overrides,
+  };
+}
+
+export function detectedDisruption(id: number, overrides: Partial<Disruption> = {}): Disruption {
+  return {
+    id,
+    flight_id: `AI-${id}`,
+    type: 'WEATHER_DELAY',
+    status: 'DETECTED',
+    description: 'Observed weather at BOM may delay the flight.',
+    delay_minutes: 90,
+    passengers_affected: null,
+    cost_impact: null,
+    detected_at: '2026-11-10T09:55:00',
+    resolved_at: null,
+    severity: 'HIGH',
+    confidence: 0.85,
+    detection_source: 'MONITOR',
+    detection_rule: 'WEATHER_OBSERVED',
+    data_origin: 'SYNTHETIC',
+    origin_airport: 'BOM',
+    destination_airport: 'DEL',
+    flight_instance_id: null,
+    actionable: true,
+    ...overrides,
+  };
+}

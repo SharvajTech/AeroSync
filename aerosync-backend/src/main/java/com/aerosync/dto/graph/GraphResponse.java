@@ -1,6 +1,7 @@
 package com.aerosync.dto.graph;
 
 import com.aerosync.graph.GraphView;
+import com.aerosync.datasource.DataSourceMode;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.LocalDate;
@@ -21,5 +22,7 @@ public record GraphResponse(
         TraversalDto traversal,
         GraphSummaryDto summary,
         List<GraphNodeDto> nodes,
-        List<GraphEdgeDto> edges) {
+        List<GraphEdgeDto> edges,
+        DataSourceMode dataMode,
+        List<String> dataSources) {
 }

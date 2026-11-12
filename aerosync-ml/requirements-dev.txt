@@ -1,0 +1,4 @@
+# aerosync-ml test dependencies (CI and local test runs only; not in the image)
+-r requirements.txt
+pytest
+httpx

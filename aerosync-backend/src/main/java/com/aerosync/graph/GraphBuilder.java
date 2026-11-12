@@ -239,7 +239,9 @@ public final class GraphBuilder {
                 flight.delayMinutes(),
                 aircraft,
                 flight.assignedGate(),
-                flight.dataOrigin());
+                flight.dataOrigin(),
+                flight.provenance(),
+                null);
     }
 
     private static int emittedAirportCount(List<GraphNodeDto> nodes) {

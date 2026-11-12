@@ -8,26 +8,72 @@ INDIAN_AIRPORTS = {
     "BOM": "VABB",
     "DEL": "VIDP",
     "BLR": "VOBL",
-    "HYD": "VOHY",
+    "HYD": "VOHS",   # Rajiv Gandhi International (VOHY is the old Begumpet airport)
 }
 
-# OpenSky credentials — register free at opensky-network.org
-# Without credentials, only live states work (not historical)
-OPENSKY_USERNAME = "sharvaj02"  # leave blank for anonymous
-OPENSKY_PASSWORD = "Sharvaj@#0205"
+# OpenSky accepts only OAuth2 client credentials (basic auth with a username
+# and password is no longer accepted). Create an API client on your OpenSky
+# account page and pass its id and secret through the environment, never in
+# this file:
+#   OPENSKY_CLIENT_ID=...  OPENSKY_CLIENT_SECRET=...  python data/opensky_fetcher.py
+# Without them only anonymous live states are fetched (400 credits a day).
+OPENSKY_CLIENT_ID = os.environ.get("OPENSKY_CLIENT_ID", "")
+OPENSKY_CLIENT_SECRET = os.environ.get("OPENSKY_CLIENT_SECRET", "")
+OPENSKY_TOKEN_URL = os.environ.get(
+    "OPENSKY_TOKEN_URL",
+    "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token")
+
+_token = {"value": None, "expires_at": 0.0}
+
+
+def _auth_headers() -> dict:
+    """Bearer header for OpenSky, or {} for anonymous access.
+
+    Tokens last about 30 minutes; one is reused until shortly before it
+    expires. The secret and the token are never printed."""
+    if not (OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET):
+        return {}
+    if _token["value"] and time.time() < _token["expires_at"] - 60:
+        return {"Authorization": f"Bearer {_token['value']}"}
+    response = requests.post(
+        OPENSKY_TOKEN_URL,
+        data={"grant_type": "client_credentials",
+              "client_id": OPENSKY_CLIENT_ID,
+              "client_secret": OPENSKY_CLIENT_SECRET},
+        timeout=15)
+    if response.status_code != 200:
+        raise RuntimeError(f"OpenSky token request failed: HTTP {response.status_code}")
+    body = response.json()
+    _token["value"] = body["access_token"]
+    _token["expires_at"] = time.time() + float(body.get("expires_in", 1800))
+    return {"Authorization": f"Bearer {_token['value']}"}
+
+
+def _rate_limited(response, icao_code: str) -> bool:
+    """True on HTTP 429. OpenSky says how long to wait; this script stops
+    instead of retrying so it never spends more credits than allowed."""
+    if response.status_code != 429:
+        return False
+    wait = response.headers.get("X-Rate-Limit-Retry-After-Seconds", "unknown")
+    print(f"  {icao_code}: OpenSky credit limit reached (retry after {wait} s) — stopping")
+    return True
+
+
+class RateLimited(Exception):
+    pass
 
 
 def fetch_live_states(icao_code: str) -> list:
     """
     Fetch LIVE flight states over Indian airports.
-    This endpoint works without authentication.
+    Works anonymously; with client credentials the authenticated quota applies.
     Bounding boxes for Indian airports.
     """
     AIRPORT_BBOX = {
         "VABB": (18.9, 72.8, 19.2, 73.1),   # Mumbai
         "VIDP": (28.5, 77.0, 28.7, 77.2),   # Delhi
         "VOBL": (12.9, 77.6, 13.2, 77.8),   # Bangalore
-        "VOHY": (17.2, 78.4, 17.5, 78.6),   # Hyderabad
+        "VOHS": (17.1, 78.3, 17.4, 78.6),   # Hyderabad (Rajiv Gandhi Intl)
     }
 
     bbox = AIRPORT_BBOX.get(icao_code)
@@ -42,28 +88,23 @@ def fetch_live_states(icao_code: str) -> list:
         "lomax": bbox[3],
     }
 
-    auth = None
-    if OPENSKY_USERNAME and OPENSKY_PASSWORD:
-        auth = (OPENSKY_USERNAME, OPENSKY_PASSWORD)
-
     try:
         response = requests.get(
-            url, params=params, auth=auth, timeout=15)
+            url, params=params, headers=_auth_headers(), timeout=15)
 
         if response.status_code == 200:
             data = response.json()
             states = data.get("states", []) or []
             print(f"  {icao_code}: {len(states)} live aircraft")
             return states
-        elif response.status_code == 429:
-            print(f"  {icao_code}: rate limited — waiting 30s")
-            time.sleep(30)
-            return []
-        else:
-            print(f"  {icao_code}: HTTP {response.status_code}")
-            return []
+        if _rate_limited(response, icao_code):
+            raise RateLimited()
+        print(f"  {icao_code}: HTTP {response.status_code}")
+        return []
+    except RateLimited:
+        raise
     except Exception as e:
-        print(f"  {icao_code}: {e}")
+        print(f"  {icao_code}: {type(e).__name__}")
         return []
 
 
@@ -110,6 +151,9 @@ def build_features_from_states(
                 "velocity_ms":    round(float(velocity), 1),
                 "altitude_m":     round(float(altitude), 0),
                 "data_source":    "opensky_live",
+                # Live states carry no schedule: the time fields are the
+                # time of the fetch, not the departure time.
+                "time_basis":     "fetch_time",
             })
         except Exception:
             continue
@@ -118,16 +162,18 @@ def build_features_from_states(
 
 
 def fetch_historical_with_auth(
-        icao_code: str, days_back: int = 7) -> list:
+        icao_code: str, days_back: int = 2) -> list:
     """
-    Historical data — only works with registered account.
-    Register free at: opensky-network.org/index.php?option=com_users&view=registration
+    Departures of the past days (OpenSky's nightly batch, so up to
+    yesterday). Needs client credentials. The documented maximum interval
+    for flight queries is two days, and each query costs up to 30 credits.
     """
-    if not OPENSKY_USERNAME:
+    if not (OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET):
         print(f"  {icao_code}: skipping historical "
-              f"(no credentials)")
+              f"(no OPENSKY_CLIENT_ID/OPENSKY_CLIENT_SECRET)")
         return []
 
+    days_back = max(1, min(days_back, 2))
     end_time   = int(datetime.now().timestamp())
     begin_time = int(
         (datetime.now() - timedelta(days=days_back)).timestamp())
@@ -141,19 +187,20 @@ def fetch_historical_with_auth(
 
     try:
         response = requests.get(
-            url, params=params,
-            auth=(OPENSKY_USERNAME, OPENSKY_PASSWORD),
-            timeout=30)
+            url, params=params, headers=_auth_headers(), timeout=30)
 
         if response.status_code == 200:
             data = response.json() or []
             print(f"  {icao_code}: {len(data)} historical flights")
             return data
-        else:
-            print(f"  {icao_code}: HTTP {response.status_code}")
-            return []
+        if _rate_limited(response, icao_code):
+            raise RateLimited()
+        print(f"  {icao_code}: HTTP {response.status_code}")
+        return []
+    except RateLimited:
+        raise
     except Exception as e:
-        print(f"  {icao_code}: {e}")
+        print(f"  {icao_code}: {type(e).__name__}")
         return []
 
 
@@ -168,7 +215,10 @@ def fetch_all_indian_airports() -> pd.DataFrame:
         print(f"  Trying {iata} ({icao})...")
 
         # Try historical (needs credentials)
-        historical = fetch_historical_with_auth(icao, days_back=7)
+        try:
+            historical = fetch_historical_with_auth(icao, days_back=2)
+        except RateLimited:
+            break
 
         if historical:
             # Process historical data
@@ -197,7 +247,10 @@ def fetch_all_indian_airports() -> pd.DataFrame:
                 frames.append(pd.DataFrame(records))
         else:
             # Fall back to live states
-            states = fetch_live_states(icao)
+            try:
+                states = fetch_live_states(icao)
+            except RateLimited:
+                break
             df = build_features_from_states(states, iata)
             if not df.empty:
                 frames.append(df)
@@ -206,8 +259,8 @@ def fetch_all_indian_airports() -> pd.DataFrame:
 
     if not frames:
         print("No OpenSky data fetched — will use synthetic only")
-        print("Tip: Register at opensky-network.org for "
-              "historical data access")
+        print("Tip: create an OpenSky API client and set "
+              "OPENSKY_CLIENT_ID / OPENSKY_CLIENT_SECRET for historical data")
         return pd.DataFrame()
 
     combined = pd.concat(frames, ignore_index=True)
@@ -226,4 +279,4 @@ if __name__ == "__main__":
                   "data_source"]].head(10))
     else:
         print("⚠️  No real data — synthetic data will be used")
-        print("    Register at opensky-network.org for full access")
+        print("    Set OPENSKY_CLIENT_ID / OPENSKY_CLIENT_SECRET for full access")

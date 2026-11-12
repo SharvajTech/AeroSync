@@ -1,5 +1,6 @@
 package com.aerosync.service;
 
+import com.aerosync.datasource.DataSourcePolicy;
 import com.aerosync.dto.operations.AirportDto;
 import com.aerosync.dto.operations.AirportOperationsResponse;
 import com.aerosync.dto.operations.AirportOperationsSummaryDto;
@@ -48,6 +49,7 @@ public class AirportOperationsService {
     private final AirportRepository airportRepository;
     private final FlightInstanceRepository flightInstanceRepository;
     private final GateRepository gateRepository;
+    private final DataSourcePolicy dataSourcePolicy;
 
     public List<AirportDto> listAirports() {
         return listAirports(AirportScope.unrestricted());
@@ -84,6 +86,9 @@ public class AirportOperationsService {
         List<FlightRecord> departures = new ArrayList<>();
         List<FlightRecord> arrivals = new ArrayList<>();
         for (FlightInstance instance : flightInstanceRepository.findAirportMovements(iata, windowStart, windowEnd)) {
+            if (!dataSourcePolicy.serves(instance)) {
+                continue;   // Stage 4: not served in the configured data mode
+            }
             FlightRecord flight = OperationalRecordMapper.toRecord(instance);
             boolean departsInWindow = flight.originIata().equals(iata)
                     && !flight.scheduledDeparture().isBefore(windowStart) && flight.scheduledDeparture().isBefore(windowEnd);
@@ -117,7 +122,8 @@ public class AirportOperationsService {
                 summarize(departures, arrivals),
                 departureRows,
                 arrivalRows,
-                gates);
+                gates,
+                dataSourcePolicy.mode());
     }
 
     private static AirportOperationsSummaryDto summarize(List<FlightRecord> departures, List<FlightRecord> arrivals) {
@@ -156,7 +162,7 @@ public class AirportOperationsService {
                 LOCAL_FORMAT.format(f.scheduledDeparture().atZone(zone)),
                 f.estimatedDeparture(), f.actualDeparture(), f.status(), f.delayMinutes(),
                 f.aircraftRegistration(), f.aircraftType() != null ? f.aircraftType() : f.scheduledAircraftType(),
-                f.assignedGate(), f.dataOrigin());
+                f.assignedGate(), f.dataOrigin(), f.provenance());
     }
 
     private static FlightMovementDto arrivalRow(FlightRecord f, ZoneId zone) {
@@ -166,7 +172,7 @@ public class AirportOperationsService {
                 LOCAL_FORMAT.format(f.scheduledArrival().atZone(zone)),
                 f.estimatedArrival(), f.actualArrival(), f.status(), f.delayMinutes(),
                 f.aircraftRegistration(), f.aircraftType() != null ? f.aircraftType() : f.scheduledAircraftType(),
-                f.assignedGate(), f.dataOrigin());
+                f.assignedGate(), f.dataOrigin(), f.provenance());
     }
 
     static AirportDto toDto(Airport airport) {

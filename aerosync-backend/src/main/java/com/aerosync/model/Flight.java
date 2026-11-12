@@ -45,6 +45,14 @@ public class Flight {
     @Enumerated(EnumType.STRING)
     private FlightStatus status;
 
+    /**
+     * Where the row came from. Rows written before Stage 4 have no value and
+     * count as SYNTHETIC: this table is filled by the schedule generator.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "data_origin", length = 20)
+    private DataOrigin dataOrigin;
+
     private String assignedGate;
     private String assignedCrewId;
 

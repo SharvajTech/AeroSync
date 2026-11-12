@@ -1,0 +1,167 @@
+# Continuous integration for AeroSync.
+#
+# Runs on pull requests to main and on pushes to main. It builds and tests
+# every service and checks the Docker setup; it never deploys anything.
+#
+# No secret is needed: all tests use mocked external APIs (OpenSky,
+# OpenWeatherMap, Gemini) and in-memory or throwaway databases. If a later
+# job needs credentials, store them as GitHub Actions secrets
+# (Settings > Secrets and variables > Actions) and pass them through `env:`;
+# never echo them.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Java 17, Maven)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: aerosync-backend
+    services:
+      # Throwaway PostgreSQL for FlywayMigrationPostgresTest (applies V1..Vn to a real
+      # PostgreSQL). Trust authentication: no password exists, and the container is
+      # reachable only from this job.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: aerosync_ci
+          POSTGRES_DB: aerosync_ci
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aerosync_ci -d aerosync_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'          # same JDK as the Docker build stage
+          cache: maven
+          cache-dependency-path: aerosync-backend/pom.xml
+      - name: Compile, test and package
+        run: ./mvnw -B -ntp verify
+        env:
+          AEROSYNC_TEST_POSTGRES_URL: jdbc:postgresql://localhost:5432/aerosync_ci
+          AEROSYNC_TEST_POSTGRES_USER: aerosync_ci
+      - name: Keep test reports
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: backend-test-reports
+          path: aerosync-backend/target/surefire-reports/
+          retention-days: 7
+
+  frontend:
+    name: Frontend (Node, Vitest, Vite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: aerosync-web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: aerosync-web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Type check
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+
+  ml:
+    name: ML service (Python 3.11, pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: aerosync-ml
+    env:
+      WEATHER_API_KEY: ''             # tests never call OpenWeatherMap
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'      # same as the Docker image
+          cache: pip
+          cache-dependency-path: |
+            aerosync-ml/requirements.txt
+            aerosync-ml/requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Tests
+        run: python -m pytest tests -q
+      - name: Health check of the running service
+        run: |
+          python -m uvicorn main:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8000/health; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "The ML service did not become healthy"; cat uvicorn.log; exit 1
+
+  docker:
+    name: Docker (compose config and image builds)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate docker-compose.yml
+        # Only interpolation needs DB_PASSWORD here; nothing is started.
+        run: DB_PASSWORD=compose-config-check docker compose config --quiet
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: aerosync-backend
+          file: aerosync-backend/Dockerfile
+          push: false
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: aerosync-web
+          file: aerosync-web/Dockerfile
+          push: false
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+      - name: Build ML image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: aerosync-ml/Dockerfile
+          push: false
+          cache-from: type=gha,scope=ml
+          cache-to: type=gha,mode=max,scope=ml
+      - name: Build Streamlit dashboard image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: aerosync-dashboard/Dockerfile
+          push: false
+          cache-from: type=gha,scope=dashboard
+          cache-to: type=gha,mode=max,scope=dashboard

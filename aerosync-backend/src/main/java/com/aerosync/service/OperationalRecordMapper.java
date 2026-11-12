@@ -1,7 +1,9 @@
 package com.aerosync.service;
 
+import com.aerosync.datasource.DataSources;
 import com.aerosync.graph.AirportRecord;
 import com.aerosync.graph.DependencyRecord;
+import com.aerosync.graph.FlightProvenance;
 import com.aerosync.graph.FlightRecord;
 import com.aerosync.model.Aircraft;
 import com.aerosync.model.Airport;
@@ -9,18 +11,19 @@ import com.aerosync.model.FlightDependency;
 import com.aerosync.model.FlightInstance;
 import com.aerosync.model.FlightSchedule;
 import com.aerosync.model.Gate;
+import com.aerosync.model.ScheduleBasis;
 
 /**
  * Maps JPA entities to the persistence-independent records consumed by the
  * graph core. Callers must have fetched the associations they need (the
  * repository graph queries do this with fetch joins).
  */
-final class OperationalRecordMapper {
+public final class OperationalRecordMapper {
 
     private OperationalRecordMapper() {
     }
 
-    static AirportRecord toRecord(Airport airport) {
+    public static AirportRecord toRecord(Airport airport) {
         return new AirportRecord(
                 airport.getAirportId(),
                 airport.getIataCode(),
@@ -32,7 +35,7 @@ final class OperationalRecordMapper {
                 airport.getStatus());
     }
 
-    static FlightRecord toRecord(FlightInstance instance) {
+    public static FlightRecord toRecord(FlightInstance instance) {
         FlightSchedule schedule = instance.getSchedule();
         Aircraft aircraft = instance.getAircraft();
         Gate gate = instance.getAssignedGate();
@@ -57,10 +60,19 @@ final class OperationalRecordMapper {
                 aircraft == null ? null : aircraft.getRegistration(),
                 aircraft == null ? null : aircraft.getAircraftType(),
                 gate == null ? null : gate.getGateNumber(),
-                schedule.getDataOrigin());
+                schedule.getDataOrigin(),
+                new FlightProvenance(
+                        schedule.getDataSource() != null ? schedule.getDataSource()
+                                : DataSources.defaultFor(schedule.getDataOrigin()),
+                        schedule.getScheduleBasis() != null ? schedule.getScheduleBasis() : ScheduleBasis.PLANNED,
+                        schedule.getSourceRecordId(),
+                        schedule.getCallsign(),
+                        schedule.getAircraftIcao24(),
+                        schedule.getIngestedAt(),
+                        schedule.getSourceUpdatedAt()));
     }
 
-    static DependencyRecord toRecord(FlightDependency dependency) {
+    public static DependencyRecord toRecord(FlightDependency dependency) {
         FlightInstance source = dependency.getSourceFlight();
         FlightInstance target = dependency.getTargetFlight();
         return new DependencyRecord(

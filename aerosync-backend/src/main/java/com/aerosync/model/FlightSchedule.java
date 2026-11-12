@@ -1,5 +1,6 @@
 package com.aerosync.model;
 
+import com.aerosync.datasource.DataSources;
 import com.aerosync.graph.NetworkIdentifiers;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -14,7 +15,6 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import jakarta.validation.constraints.AssertTrue;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import lombok.AllArgsConstructor;
@@ -83,8 +83,8 @@ public class FlightSchedule {
     @Column(name = "operating_airline", nullable = false, length = 3)
     private String operatingAirline;
 
-    @NotBlank
-    @Column(name = "aircraft_type", nullable = false, length = 10)
+    /** Planned aircraft type; null when the source does not report it (OpenSky). */
+    @Column(name = "aircraft_type", length = 10)
     private String aircraftType;
 
     @NotNull
@@ -96,10 +96,51 @@ public class FlightSchedule {
     @Column(name = "data_origin", nullable = false, length = 20)
     private DataOrigin dataOrigin;
 
+    /**
+     * Which system wrote the row (see {@link com.aerosync.datasource.DataSources}).
+     * Defaults from {@link #dataOrigin} when not set.
+     */
+    @Column(name = "data_source", nullable = false, length = 40)
+    private String dataSource;
+
+    /**
+     * PLANNED: {@code scheduledDeparture/Arrival} are a timetable. OBSERVED:
+     * no timetable is known and they hold the observed departure and arrival.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "schedule_basis", nullable = false, length = 20)
+    private ScheduleBasis scheduleBasis;
+
+    /** Identifier of the record in the external source; null for local records. */
+    @Column(name = "source_record_id", length = 64)
+    private String sourceRecordId;
+
+    /** Callsign reported by the external source, if any. */
+    @Column(name = "callsign", length = 8)
+    private String callsign;
+
+    /** Transponder address (lower-case hex) reported by the external source, if any. */
+    @Column(name = "aircraft_icao24", length = 6)
+    private String aircraftIcao24;
+
+    /** When ingestion first wrote the row; null for rows not written by ingestion. */
+    @Column(name = "ingested_at")
+    private Instant ingestedAt;
+
+    /** When ingestion last confirmed or changed the row. */
+    @Column(name = "source_updated_at")
+    private Instant sourceUpdatedAt;
+
     @PrePersist
     void prePersist() {
         if (scheduleId == null) {
             scheduleId = UUID.randomUUID();
+        }
+        if (dataSource == null) {
+            dataSource = DataSources.defaultFor(dataOrigin);
+        }
+        if (scheduleBasis == null) {
+            scheduleBasis = ScheduleBasis.PLANNED;
         }
     }
 

@@ -1,6 +1,8 @@
 package com.aerosync.repository;
 
+import com.aerosync.model.AircraftStatus;
 import com.aerosync.model.FlightInstance;
+import com.aerosync.model.FlightInstanceStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -85,4 +87,46 @@ public interface FlightInstanceRepository extends JpaRepository<FlightInstance, 
     Optional<FlightInstance> findGraphFlightById(@Param("flightId") UUID flightId);
 
     boolean existsBySchedule_ScheduleId(UUID scheduleId);
+
+    // ── Stage 4: ingestion and disruption monitoring ─────────────────────────
+
+    Optional<FlightInstance> findBySchedule_ScheduleId(UUID scheduleId);
+
+    /**
+     * Flights that are running late: scheduled to depart in the window, not
+     * finished, and either carrying a recorded delay or marked delayed.
+     */
+    @Query("""
+            select fi from FlightInstance fi
+            join fetch fi.schedule s
+            join fetch s.origin
+            join fetch s.destination
+            left join fetch fi.aircraft
+            left join fetch fi.assignedGate
+            where s.scheduledDeparture >= :windowStart and s.scheduledDeparture < :windowEnd
+              and fi.status not in :finished
+              and (fi.delayMinutes >= :minDelayMinutes or fi.status = :delayedStatus)
+            """)
+    List<FlightInstance> findLateFlights(@Param("windowStart") Instant windowStart,
+                                         @Param("windowEnd") Instant windowEnd,
+                                         @Param("minDelayMinutes") int minDelayMinutes,
+                                         @Param("delayedStatus") FlightInstanceStatus delayedStatus,
+                                         @Param("finished") Collection<FlightInstanceStatus> finished);
+
+    /** Flights still to depart in the window whose assigned aircraft is not available. */
+    @Query("""
+            select fi from FlightInstance fi
+            join fetch fi.schedule s
+            join fetch s.origin
+            join fetch s.destination
+            join fetch fi.aircraft a
+            left join fetch fi.assignedGate
+            where s.scheduledDeparture >= :windowStart and s.scheduledDeparture < :windowEnd
+              and fi.status in :pending
+              and a.status in :unavailable
+            """)
+    List<FlightInstance> findFlightsWithUnavailableAircraft(@Param("windowStart") Instant windowStart,
+                                                            @Param("windowEnd") Instant windowEnd,
+                                                            @Param("pending") Collection<FlightInstanceStatus> pending,
+                                                            @Param("unavailable") Collection<AircraftStatus> unavailable);
 }

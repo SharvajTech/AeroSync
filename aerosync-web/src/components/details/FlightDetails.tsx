@@ -15,6 +15,7 @@ import {
   localClock,
   titleCase,
 } from '../../utils/format';
+import { ago, confidencePercent, hasObservedTimes, originTone, severityTone, sourceLabel } from '../../utils/liveData';
 import { StatusBadge } from '../common/StatusBadge';
 import { ErrorState, LoadingState } from '../common/States';
 
@@ -41,7 +42,8 @@ export function FlightDetails({ flightId, initial, onSelect, onShowDependencies,
     return <LoadingState label="Loading flight…" />;
   }
 
-  const delayed = isDelayed(flight.status, flight.delay_minutes);
+  const observed = hasObservedTimes(flight.provenance);
+  const delayed = !observed && isDelayed(flight.status, flight.delay_minutes);
   return (
     <div className="details" data-testid="flight-details">
       <div className="details__head">
@@ -66,7 +68,12 @@ export function FlightDetails({ flightId, initial, onSelect, onShowDependencies,
 
       <div className="details__sections">
         <section className="details__section">
-          <h3 className="details__label">Schedule</h3>
+          <h3 className="details__label">{observed ? 'Observed times' : 'Schedule'}</h3>
+          {observed && (
+            <p className="details__muted" data-testid="observed-times">
+              No timetable is known for this flight. These are the departure and arrival the source observed, so no delay can be given.
+            </p>
+          )}
           <dl className="kv">
             <dt>Departure</dt>
             <dd>
@@ -91,9 +98,33 @@ export function FlightDetails({ flightId, initial, onSelect, onShowDependencies,
               </>
             )}
             <dt>Delay</dt>
-            <dd className={delayed ? 'kv__warning' : undefined}>{delayLabel(flight.delay_minutes)}</dd>
+            <dd className={delayed ? 'kv__warning' : undefined}>{observed ? 'Not known' : delayLabel(flight.delay_minutes)}</dd>
           </dl>
         </section>
+
+        {flight.disruption && (
+          <section className="details__section" data-testid="flight-disruption">
+            <h3 className="details__label">Active disruption</h3>
+            <dl className="kv">
+              <dt>Type</dt>
+              <dd>{titleCase(flight.disruption.disruption_type)}</dd>
+              <dt>Severity</dt>
+              <dd>
+                {flight.disruption.severity ? (
+                  <StatusBadge tone={severityTone(flight.disruption.severity)}>{titleCase(flight.disruption.severity)}</StatusBadge>
+                ) : '—'}
+                {flight.disruption.confidence != null && (
+                  <span className="kv__muted"> {confidencePercent(flight.disruption.confidence)} confidence</span>
+                )}
+              </dd>
+              <dt>Detected</dt>
+              <dd>{flight.disruption.detected_at ? ago(flight.disruption.detected_at) : '—'}</dd>
+              <dt>Status</dt>
+              <dd>{titleCase(flight.disruption.status)}</dd>
+            </dl>
+            <p className="details__muted">Detected by the monitor for awareness. See the Operations page for the list.</p>
+          </section>
+        )}
 
         <section className="details__section">
           <h3 className="details__label">Aircraft</h3>
@@ -151,7 +182,43 @@ export function FlightDetails({ flightId, initial, onSelect, onShowDependencies,
             </button>
           )}
         </section>
-        {flight.data_origin === 'SYNTHETIC' && <p className="details__muted">Synthetic demonstration data.</p>}
+        <section className="details__section" data-testid="flight-provenance">
+          <h3 className="details__label">Data source</h3>
+          <dl className="kv">
+            <dt>Source</dt>
+            <dd>
+              <StatusBadge tone={originTone(flight.data_origin)}>{sourceLabel(flight.provenance?.data_source, flight.data_origin)}</StatusBadge>
+            </dd>
+            {flight.provenance?.callsign && (
+              <>
+                <dt>Callsign</dt>
+                <dd className="mono">{flight.provenance.callsign}</dd>
+              </>
+            )}
+            {flight.provenance?.aircraft_icao24 && (
+              <>
+                <dt>Transponder</dt>
+                <dd className="mono">{flight.provenance.aircraft_icao24}</dd>
+              </>
+            )}
+            {flight.provenance?.ingested_at && (
+              <>
+                <dt>Imported</dt>
+                <dd>{ago(flight.provenance.ingested_at)}</dd>
+              </>
+            )}
+            {flight.provenance?.source_updated_at && (
+              <>
+                <dt>Last confirmed</dt>
+                <dd>{ago(flight.provenance.source_updated_at)}</dd>
+              </>
+            )}
+          </dl>
+          {flight.data_origin === 'SYNTHETIC' && <p className="details__muted">Synthetic demonstration data, not a real flight.</p>}
+          {flight.provenance?.callsign && flight.data_origin === 'IMPORTED' && (
+            <p className="details__muted">The flight number is derived from the callsign.</p>
+          )}
+        </section>
       </div>
     </div>
   );

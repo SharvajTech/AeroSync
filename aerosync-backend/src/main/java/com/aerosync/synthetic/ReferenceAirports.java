@@ -2,6 +2,7 @@ package com.aerosync.synthetic;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -78,6 +79,18 @@ public final class ReferenceAirports {
             new ReferenceAirport("BBI", "Biju Patnaik International Airport", "Bhubaneswar",
                     INDIA_TIME_ZONE, 20.2444, 85.8178));
 
+    /**
+     * ICAO location indicators of the reference airports (real public
+     * reference data, same values as migration V4). OpenSky identifies
+     * airports by these codes.
+     */
+    public static final Map<String, String> ICAO_CODES = Map.ofEntries(
+            Map.entry("BOM", "VABB"), Map.entry("DEL", "VIDP"), Map.entry("BLR", "VOBL"),
+            Map.entry("HYD", "VOHS"), Map.entry("CCU", "VECC"), Map.entry("MAA", "VOMM"),
+            Map.entry("AMD", "VAAH"), Map.entry("GOI", "VOGO"), Map.entry("PNQ", "VAPO"),
+            Map.entry("COK", "VOCI"), Map.entry("JAI", "VIJP"), Map.entry("LKO", "VILK"),
+            Map.entry("GAU", "VEGT"), Map.entry("NAG", "VANP"), Map.entry("BBI", "VEBS"));
+
     private static final double EARTH_RADIUS_KM = 6371.0088;
 
     private ReferenceAirports() {
@@ -86,6 +99,11 @@ public final class ReferenceAirports {
     /** Name-based (type 3) UUID of {@code "aerosync:airport:" + IATA}. */
     public static UUID airportUuid(String iataCode) {
         return UUID.nameUUIDFromBytes(("aerosync:airport:" + iataCode).getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** ICAO code of a reference airport, or null when the airport is not one. */
+    public static String icaoCode(String iataCode) {
+        return iataCode == null ? null : ICAO_CODES.get(iataCode);
     }
 
     public static Optional<ReferenceAirport> find(String iataCode) {

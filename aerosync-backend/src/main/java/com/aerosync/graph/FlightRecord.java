@@ -32,7 +32,22 @@ public record FlightRecord(
         String aircraftRegistration,
         String aircraftType,
         String assignedGate,
-        DataOrigin dataOrigin) {
+        DataOrigin dataOrigin,
+        FlightProvenance provenance) {
+
+    /** Without provenance (records built outside the database mapper). */
+    public FlightRecord(UUID flightId, UUID scheduleId, String flightNumber, LocalDate serviceDate,
+                        String originIata, String destinationIata, Instant scheduledDeparture,
+                        Instant scheduledArrival, Instant estimatedDeparture, Instant estimatedArrival,
+                        Instant actualDeparture, Instant actualArrival, int delayMinutes,
+                        FlightInstanceStatus status, String operatingAirline, String scheduledAircraftType,
+                        UUID aircraftId, String aircraftRegistration, String aircraftType, String assignedGate,
+                        DataOrigin dataOrigin) {
+        this(flightId, scheduleId, flightNumber, serviceDate, originIata, destinationIata, scheduledDeparture,
+                scheduledArrival, estimatedDeparture, estimatedArrival, actualDeparture, actualArrival,
+                delayMinutes, status, operatingAirline, scheduledAircraftType, aircraftId, aircraftRegistration,
+                aircraftType, assignedGate, dataOrigin, null);
+    }
 
     public DependencyRules.FlightLeg toLeg() {
         return new DependencyRules.FlightLeg(flightId, flightNumber, originIata, destinationIata,

@@ -1,5 +1,7 @@
 package com.aerosync.service;
 
+import com.aerosync.datasource.DataSourcePolicy;
+import com.aerosync.exception.OperationNotAvailableException;
 import com.aerosync.exception.ResourceNotFoundException;
 import com.aerosync.model.Disruption;
 import com.aerosync.model.Flight;
@@ -23,10 +25,13 @@ public class DisruptionAccessService {
 
     private final DisruptionRepository disruptionRepository;
     private final FlightRepository flightRepository;
+    private final DataSourcePolicy dataSourcePolicy;
 
-    public DisruptionAccessService(DisruptionRepository disruptionRepository, FlightRepository flightRepository) {
+    public DisruptionAccessService(DisruptionRepository disruptionRepository, FlightRepository flightRepository,
+                                   DataSourcePolicy dataSourcePolicy) {
         this.disruptionRepository = disruptionRepository;
         this.flightRepository = flightRepository;
+        this.dataSourcePolicy = dataSourcePolicy;
     }
 
     /**
@@ -35,19 +40,37 @@ public class DisruptionAccessService {
      * @throws com.aerosync.exception.AccessForbiddenException read-only role, or
      *         the flight departs from an airport outside the user's scope (403)
      * @throws ResourceNotFoundException the disruption's flight no longer exists
+     * @throws OperationNotAvailableException the disruption is advisory (409)
      */
     @Transactional(readOnly = true)
     public Optional<Disruption> authorizeAction(Long disruptionId, AuthenticatedUser user) {
         user.requireOperatorRole();
-        Optional<Disruption> disruption = disruptionRepository.findById(disruptionId);
-        if (disruption.isEmpty()) {
+        Optional<Disruption> found = disruptionRepository.findById(disruptionId);
+        if (found.isEmpty()) {
             return Optional.empty();
         }
-        Flight flight = flightRepository.findByFlightId(disruption.get().getFlightId())
-                .orElseThrow(() -> new ResourceNotFoundException("Flight " + disruption.get().getFlightId()
+        Disruption disruption = found.get();
+        String label = "Disruption " + disruptionId + " (flight " + disruption.getFlightId() + ")";
+
+        if (disruption.getFlightInstanceId() != null) {
+            // Advisory disruption of an operational-network flight: the airport
+            // stored at detection time decides who may know about it (403 first,
+            // so other airports learn nothing), and there is nothing to execute.
+            user.scope().requireOperate(disruption.getOriginAirport(), label);
+            if (!dataSourcePolicy.serves(disruption.getDataOrigin())) {
+                return Optional.empty();
+            }
+            throw new OperationNotAvailableException(label + " is advisory: it concerns an operational-network "
+                    + "flight, for which AeroSync has no gate or crew data to build a resolution from");
+        }
+
+        Flight flight = flightRepository.findByFlightId(disruption.getFlightId())
+                .orElseThrow(() -> new ResourceNotFoundException("Flight " + disruption.getFlightId()
                         + " of disruption " + disruptionId + " not found"));
-        user.scope().requireOperate(flight.getOrigin(),
-                "Disruption " + disruptionId + " (flight " + flight.getFlightId() + ")");
-        return disruption;
+        user.scope().requireOperate(flight.getOrigin(), label);
+        if (!dataSourcePolicy.serves(flight)) {
+            return Optional.empty();
+        }
+        return found;
     }
 }

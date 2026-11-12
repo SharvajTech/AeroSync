@@ -1,8 +1,10 @@
 import { RequestCache } from './cache';
 import { getJson, postJson } from './client';
 import type {
+  AirportLiveTraffic,
   AirportOperations,
   AirportSummary,
+  AirportWeather,
   DependencyType,
   Disruption,
   DisruptionType,
@@ -11,6 +13,7 @@ import type {
   OperationsFlight,
   ResolutionProposal,
   ResolutionResult,
+  SystemStatus,
   UserProfile,
 } from './types';
 
@@ -70,6 +73,21 @@ export const api = {
     });
   },
 
+  /**
+   * Fetches the network again, bypassing the cache, and stores the answer
+   * (Stage 4 background refresh). On failure the cached value is left as it
+   * is, so the graph keeps showing the last good data.
+   */
+  async refreshNetwork(date: string, airport: string): Promise<GraphResponse> {
+    const response = await getJson<GraphResponse>('/api/graph/network', {
+      date,
+      include_dependencies: true,
+      airports: airport,
+    });
+    apiCache.put(keys.network(airport, date), response);
+    return response;
+  },
+
   /** GET /api/airports — the airports of the signed-in user. */
   airports(): Promise<AirportSummary[]> {
     return apiCache.get(keys.airports(), () => getJson<AirportSummary[]>('/api/airports'));
@@ -119,6 +137,24 @@ export const api = {
   /** GET /api/flights?airport= — operations flights of the airport (for reporting a disruption). */
   operationsFlights(airport: string): Promise<OperationsFlight[]> {
     return apiCache.get(keys.operationsFlights(airport), () => getJson<OperationsFlight[]>('/api/flights', { airport }));
+  },
+
+  // ── Stage 4: live data and pipeline status ──────────────────────────────
+  // Never cached: these are polled, and the answer is only useful when fresh.
+
+  /** GET /api/system/status — data mode, feed freshness, dependency health, monitor. */
+  systemStatus(): Promise<SystemStatus> {
+    return getJson<SystemStatus>('/api/system/status');
+  },
+
+  /** GET /api/airports/{iata}/live-aircraft — aircraft observed at or near one of the user's airports. */
+  liveAircraft(iata: string): Promise<AirportLiveTraffic> {
+    return getJson<AirportLiveTraffic>(`/api/airports/${encodeURIComponent(iata)}/live-aircraft`);
+  },
+
+  /** GET /api/airports/{iata}/weather — latest observation and upcoming forecast steps. */
+  airportWeather(iata: string): Promise<AirportWeather> {
+    return getJson<AirportWeather>(`/api/airports/${encodeURIComponent(iata)}/weather`);
   },
 
   /** POST /api/disruptions/trigger — needs an operator role at the flight's departure airport. */

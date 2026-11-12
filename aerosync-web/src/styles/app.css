@@ -1639,3 +1639,173 @@ button.chip:hover {
   display: flex;
   gap: var(--space-2);
 }
+
+/* ── Stage 4: data status, live data, disruption detection ─────────────────── */
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 6px 24px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-size: 12px;
+  min-height: 34px;
+}
+
+.status-bar__spacer {
+  flex: 1 1 auto;
+}
+
+.status-bar__muted {
+  color: var(--color-text-muted);
+}
+
+.status-bar__warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.status-chip__label {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.status-chip__detail {
+  color: var(--color-text-muted);
+}
+
+.icon-button--small {
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+}
+
+.live-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(320px, 2fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.live-grid .card__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.live-weather {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.live-weather__text {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.live-forecast {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-border);
+}
+
+.live-forecast__list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.live-forecast__list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.table--compact th,
+.table--compact td {
+  padding-top: 5px;
+  padding-bottom: 5px;
+  font-size: 12px;
+}
+
+.table tr.is-stale td {
+  opacity: 0.6;
+}
+
+.notice--warning {
+  background: var(--color-warning-soft);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning);
+}
+
+.notice svg {
+  vertical-align: -2px;
+  margin-right: 4px;
+}
+
+.disruption__description {
+  max-width: 44ch;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.disruption__new {
+  margin-left: 6px;
+}
+
+.movement__source {
+  margin-left: 6px;
+  font-size: 10px;
+}
+
+.graph-card__provenance {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.graph-tooltip__alert {
+  margin-top: 2px;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.legend__dot--external,
+.legend__dot--ring {
+  border: 2px solid transparent;
+  box-sizing: content-box;
+}
+
+.legend__dot--external {
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+
+@media (max-width: 900px) {
+  .live-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .status-bar {
+    padding: 6px 12px;
+  }
+}

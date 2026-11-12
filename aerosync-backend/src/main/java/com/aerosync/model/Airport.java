@@ -47,6 +47,11 @@ public class Airport {
     @Column(name = "iata_code", nullable = false, length = 3)
     private String iataCode;
 
+    /** ICAO location indicator (e.g. VABB), the airport key of OpenSky; null when unknown. */
+    @Pattern(regexp = "^[A-Z]{4}$", message = "must be a four-letter ICAO code")
+    @Column(name = "icao_code", length = 4)
+    private String icaoCode;
+
     @NotBlank
     @Column(name = "airport_name", nullable = false, length = 120)
     private String airportName;
@@ -96,6 +101,9 @@ public class Airport {
     private void normalize() {
         if (iataCode != null) {
             iataCode = iataCode.trim().toUpperCase(Locale.ROOT);
+        }
+        if (icaoCode != null) {
+            icaoCode = icaoCode.isBlank() ? null : icaoCode.trim().toUpperCase(Locale.ROOT);
         }
     }
 }

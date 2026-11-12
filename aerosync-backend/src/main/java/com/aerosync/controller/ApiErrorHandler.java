@@ -4,6 +4,7 @@ import com.aerosync.exception.AccessForbiddenException;
 import com.aerosync.exception.AuthenticationRequiredException;
 import com.aerosync.exception.InvalidCredentialsException;
 import com.aerosync.exception.InvalidRequestParameterException;
+import com.aerosync.exception.OperationNotAvailableException;
 import com.aerosync.exception.ResourceNotFoundException;
 import com.aerosync.exception.TooManyLoginAttemptsException;
 import org.springframework.http.HttpHeaders;
@@ -58,6 +59,11 @@ public class ApiErrorHandler {
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<Map<String, Object>> notFound(ResourceNotFoundException ex) {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), null, null);
+    }
+
+    @ExceptionHandler(OperationNotAvailableException.class)
+    public ResponseEntity<Map<String, Object>> notAvailable(OperationNotAvailableException ex) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "not_available", null);
     }
 
     private static ResponseEntity<Map<String, Object>> error(HttpStatus status, String message, String code,

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { LuMaximize, LuMinus, LuPlus } from 'react-icons/lu';
 import type { FlightNode } from '../api/types';
 import { localClock, titleCase } from '../utils/format';
+import { hasObservedTimes, sourceLabel } from '../utils/liveData';
 import { graphStylesheet } from './style';
 import type { VisualGraph, VisualNode } from './model';
 
@@ -30,7 +31,16 @@ function toElements(graph: VisualGraph): cytoscape.ElementDefinition[] {
   return [
     ...graph.nodes.map<cytoscape.ElementDefinition>((node) => ({
       group: 'nodes',
-      data: { id: node.id, label: node.label, kind: node.kind, tone: node.tone, role: node.role ?? '', context: node.context ? 'yes' : 'no' },
+      data: {
+        id: node.id,
+        label: node.label,
+        kind: node.kind,
+        tone: node.tone,
+        role: node.role ?? '',
+        context: node.context ? 'yes' : 'no',
+        disrupted: node.disrupted ? 'yes' : 'no',
+        external: node.external ? 'yes' : 'no',
+      },
       position: { ...node.position },
     })),
     ...graph.edges.map<cytoscape.ElementDefinition>((edge) => ({
@@ -212,6 +222,16 @@ function HoverCard({ hover }: { hover: Hover }) {
         {localClock(flight.scheduled_departure_local)}–{localClock(flight.scheduled_arrival_local)} · {titleCase(flight.status)}
         {flight.delay_minutes > 0 ? ` · +${flight.delay_minutes} min` : ''}
       </div>
+      <div className="graph-tooltip__meta">
+        {sourceLabel(flight.provenance?.data_source, flight.data_origin)}
+        {hasObservedTimes(flight.provenance) ? ' · observed times' : ''}
+      </div>
+      {flight.disruption && (
+        <div className="graph-tooltip__alert">
+          {titleCase(flight.disruption.disruption_type)}
+          {flight.disruption.severity ? ` · ${titleCase(flight.disruption.severity)}` : ''}
+        </div>
+      )}
     </div>
   );
 }

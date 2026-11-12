@@ -1,5 +1,7 @@
 # AeroSync
 
+[![CI](https://github.com/SharvajTech/AeroSync/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SharvajTech/AeroSync/actions/workflows/ci.yml)
+
 **Intelligent flight delay prediction and autonomous disruption resolution for airport operations.**
 
 AeroSync is a full-stack aviation operations platform that combines machine learning, rule-based constraint solving, and generative AI to predict flight delays, simulate cascade effects across a flight network, and resolve operational disruptions in seconds — with optional human-in-the-loop approval.
@@ -21,6 +23,8 @@ Built as a portfolio project demonstrating end-to-end system design across backe
 - [API Reference](#api-reference)
 - [Getting Started](#getting-started)
 - [Configuration](#configuration)
+- [Live Data and Monitoring](#live-data-and-monitoring)
+- [Continuous Integration](#continuous-integration)
 - [Skills Demonstrated](#skills-demonstrated)
 - [Roadmap](#roadmap)
 - [License](#license)
@@ -65,6 +69,9 @@ Manual coordination between ops teams typically takes **20–40 minutes** and st
 | **Operations data** | JPA entities for flights, gates, crew, disruptions; JSONB resolution storage |
 | **Schedule generation** | Daily flight schedule seeded with live weather scores on startup |
 | **Auth** | Username/password login (BCrypt), JWT bearer tokens, airport-scoped access: users only see and change the airports assigned to them |
+| **Live data (Stage 4)** | OpenSky Network aircraft states and past flights, airport weather observations, data modes SYNTHETIC / HYBRID / LIVE with the source on every record |
+| **Disruption monitoring** | Background detection of weather, crew, delay-risk, turnaround, connection and aircraft problems with severity and confidence; never acts without approval |
+| **CI** | GitHub Actions: backend, frontend, ML tests and Docker image builds on every pull request |
 
 ---
 
@@ -255,12 +262,18 @@ Example response from `POST /predict` includes `delay_probability`, `risk_level`
 | `GET` | `/api/graph/flights/{flightId}?depth=` | A flight instance with upstream/downstream dependencies |
 | `GET` | `/api/graph/flights/{flightId}/affected` | Flights reachable downstream through dependencies |
 | `GET` | `/api/airports` / `/api/airports/{iata}/operations?date=` | Airports; departures, arrivals and gates of one airport |
+| `GET` | `/api/airports/{iata}/live-aircraft` | Aircraft reported near one of your airports (OpenSky; Stage 4) |
+| `GET` | `/api/airports/{iata}/weather` | Latest observation and, separately, the forecast of one of your airports (Stage 4) |
+| `GET` | `/api/system/status` | Data mode, feed freshness, database/ML health, disruption monitor (Stage 4) |
+| `GET` | `/api/health/ready` | Readiness: database reachable (public, `UP`/`DOWN` only) |
 
 Every endpoint except login and health needs `Authorization: Bearer <token>`
 and is limited to the signed-in user's airports (other airports: 403). See
 [`aerosync-backend/docs/SECURITY.md`](aerosync-backend/docs/SECURITY.md). The
 operational network graph (Stage 1) is documented in
-[`aerosync-backend/docs/OPERATIONAL_NETWORK.md`](aerosync-backend/docs/OPERATIONAL_NETWORK.md).
+[`aerosync-backend/docs/OPERATIONAL_NETWORK.md`](aerosync-backend/docs/OPERATIONAL_NETWORK.md),
+live data and monitoring (Stage 4) in
+[`aerosync-backend/docs/LIVE_DATA.md`](aerosync-backend/docs/LIVE_DATA.md).
 
 **Trigger disruption example**
 
@@ -349,6 +362,16 @@ docker compose up --build
 Web dashboard http://localhost:3000, backend http://localhost:8082. `.env` is
 ignored by git; keep real secrets only there.
 
+The stack starts in `SYNTHETIC` mode and needs no external API. To add live
+data, set in `.env` and run `docker compose up -d backend` again:
+
+```bash
+AEROSYNC_DATA_MODE=HYBRID            # synthetic schedule + live data, each labelled
+OPENSKY_CLIENT_ID=...                # OpenSky API client (optional; anonymous otherwise)
+OPENSKY_CLIENT_SECRET=...
+WEATHER_API_KEY=...                  # OpenWeatherMap (optional)
+```
+
 ### 5. Sign in (demo accounts, development only)
 
 Set these in `.env` for Docker Compose (see [`.env.example`](.env.example)), or
@@ -402,7 +425,59 @@ Configure via `application.properties` (backend) and environment variables (ML).
 | `JWT_EXPIRATION` | Backend | Token lifetime in ms (default 8 h) |
 | `AEROSYNC_DEMO_USERS_ENABLED`, `AEROSYNC_DEMO_PASSWORD`, `AEROSYNC_DEMO_USERS` | Backend | Development-only demo accounts |
 | `WEATHER_API_KEY` | ML | Live weather in `/predict` |
+| `AEROSYNC_DATA_MODE` | Backend | `SYNTHETIC` (default), `HYBRID` or `LIVE` |
+| `OPENSKY_CLIENT_ID`, `OPENSKY_CLIENT_SECRET` | Backend | OpenSky API client (OAuth2); empty = anonymous |
+| `OPENSKY_STATES_POLL_SECONDS` | Backend | Wanted live-aircraft poll interval (raised automatically to stay within OpenSky's credits) |
+| `AEROSYNC_MONITORING_ENABLED` | Backend | Disruption monitor (default on; detects only) |
+| `AEROSYNC_LOG_LEVEL` | Backend | Log level of `com.aerosync` (default `INFO`) |
 
+All Stage 4 settings with defaults:
+[`aerosync-backend/docs/LIVE_DATA.md`](aerosync-backend/docs/LIVE_DATA.md#8-configuration).
+
+---
+
+## Live Data and Monitoring
+
+Stage 4 connects AeroSync to real aviation data without giving up the
+synthetic demo:
+
+- **Data modes.** `SYNTHETIC` (default, no external API), `HYBRID`
+  (synthetic schedule plus imported data) and `LIVE` (imported data only).
+  Every flight, aircraft state, weather report and disruption records its
+  source; the dashboard shows the mode and the source of every imported
+  flight, and never presents synthetic data as live.
+- **OpenSky Network.** Aircraft states around the network's airports and
+  completed flights of previous days, fetched in the background with
+  OAuth2, timeouts, retries, backoff and a credit budget that respects
+  OpenSky's daily limits. OpenSky has no timetables, delays, aircraft types
+  or flight status; AeroSync does not invent them.
+- **Weather.** Observations and forecasts per airport, stored separately;
+  only observations feed predictions and detection.
+- **Disruption monitoring.** Detected disruptions appear on the Operations
+  page with severity, confidence, source and time; resolving them still
+  needs a controller's proposal and approval.
+
+Details, field lists and limitations:
+[`aerosync-backend/docs/LIVE_DATA.md`](aerosync-backend/docs/LIVE_DATA.md).
+
+## Continuous Integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull
+request to `main` and every push to `main` (and manually via *Run workflow*):
+
+| Job | Steps |
+|-----|-------|
+| Backend | JDK 17, Maven cache, `./mvnw -B verify` (unit and Spring/H2 integration tests), Flyway migrations against a throwaway PostgreSQL 16 service |
+| Frontend | Node 22, npm cache, `npm ci`, `npm run typecheck`, `npm test`, `npm run build` |
+| ML | Python 3.11, pip cache, `pytest`, then starts the service with uvicorn and checks `/health` |
+| Docker | `docker compose config`, builds the backend, web, ML and Streamlit images (layer cache in GitHub Actions) |
+
+Setup: nothing is required. The workflow uses no secrets because every test
+mocks the external APIs; it has read-only repository permissions and does
+not deploy. If a future job needs a credential, add it under *Settings →
+Secrets and variables → Actions* and reference it as `${{ secrets.NAME }}`;
+never print it. To make the checks mandatory, enable branch protection for
+`main` with the four CI jobs as required status checks.
 ---
 
 ## Skills Demonstrated
@@ -421,11 +496,12 @@ Configure via `application.properties` (backend) and environment variables (ML).
 
 - [x] React operations dashboard (`aerosync-web`, port 3000)
 - [ ] WebSocket live disruption feed
-- [ ] OpenSky Network integration for real flight telemetry (`data/opensky_fetcher.py`)
-- [ ] Unit and integration tests for rule engine and cascade logic
+- [x] OpenSky Network integration for real flight telemetry (Stage 4, backend ingestion)
+- [x] Disruption monitoring with severity and confidence (Stage 4)
+- [ ] Unit and integration tests for rule engine and cascade logic (partly: resolution scope, monitoring rules)
 - [x] Docker Compose for one-command local deployment
 - [x] Sign-in and airport-scoped access (Stage 3)
-- [ ] CI pipeline with model artefact validation
+- [x] CI pipeline (GitHub Actions) with model regression tests (Stage 4)
 
 ---
 

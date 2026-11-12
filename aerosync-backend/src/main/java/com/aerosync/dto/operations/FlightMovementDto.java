@@ -1,5 +1,6 @@
 package com.aerosync.dto.operations;
 
+import com.aerosync.graph.FlightProvenance;
 import com.aerosync.model.DataOrigin;
 import com.aerosync.model.FlightInstanceStatus;
 
@@ -28,5 +29,6 @@ public record FlightMovementDto(
         String aircraftRegistration,
         String aircraftType,
         String assignedGate,
-        DataOrigin dataOrigin) {
+        DataOrigin dataOrigin,
+        FlightProvenance provenance) {
 }

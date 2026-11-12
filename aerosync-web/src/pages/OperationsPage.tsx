@@ -9,6 +9,7 @@ import { EmptyState, ErrorState, LoadingState } from '../components/common/State
 import { Tabs } from '../components/common/Tabs';
 import { DetailsPanel } from '../components/details/DetailsPanel';
 import { PageHeader } from '../components/layout/PageHeader';
+import { AirportLivePanel } from '../components/live/AirportLivePanel';
 import { DisruptionsPanel } from '../components/operations/DisruptionsPanel';
 import type { RouteName } from '../hooks/useHashRoute';
 import { useResource } from '../hooks/useResource';
@@ -16,6 +17,7 @@ import { useAirport } from '../state/AirportContext';
 import { useOperatingDate } from '../state/OperatingDate';
 import type { Selection } from '../state/selection';
 import { delayLabel, flightStatusTone, formatDateLong, isDelayed, localClock, titleCase } from '../utils/format';
+import { hasObservedTimes, sourceLabel } from '../utils/liveData';
 
 type Navigate = (route: RouteName, params?: Record<string, string | null | undefined>) => void;
 type Board = 'departures' | 'arrivals';
@@ -139,7 +141,14 @@ export function OperationsPage({ params, navigate }: { params: Record<string, st
           onShowAffected={(flightId) => navigate('network', { flight: flightId, view: 'affected' })}
         />
       </div>
-      {iata && <DisruptionsPanel airport={iata} canOperate={user.can_operate} />}
+      {iata && <AirportLivePanel airport={iata} />}
+      {iata && (
+        <DisruptionsPanel
+          airport={iata}
+          canOperate={user.can_operate}
+          onViewFlight={(flightId) => navigate('network', { flight: flightId, view: 'affected' })}
+        />
+      )}
     </>
   );
 }
@@ -176,12 +185,19 @@ function MovementTable({ rows, board, selectedId, onSelect }: {
                 <button type="button" className="row-link" onClick={() => onSelect(m.flight_instance_id)}>
                   <span className="code">{m.flight_number}</span>
                 </button>
+                {m.data_origin === 'IMPORTED' && (
+                  <span className="badge badge--success movement__source" title="From an external source; times are observed, not scheduled">
+                    {sourceLabel(m.provenance?.data_source, m.data_origin)}
+                  </span>
+                )}
               </td>
               <td>{m.counterpart_airport}</td>
               <td>{m.aircraft_registration ?? '—'} <span className="text-muted">{m.aircraft_type ?? ''}</span></td>
               <td>{m.assigned_gate ?? '—'}</td>
               <td><StatusBadge tone={flightStatusTone(m.status, m.delay_minutes)}>{titleCase(m.status)}</StatusBadge></td>
-              <td className={isDelayed(m.status, m.delay_minutes) ? 'text-warning' : 'text-muted'}>{delayLabel(m.delay_minutes)}</td>
+              <td className={!hasObservedTimes(m.provenance) && isDelayed(m.status, m.delay_minutes) ? 'text-warning' : 'text-muted'}>
+                {hasObservedTimes(m.provenance) ? <span title="No timetable is known for this flight">n/a</span> : delayLabel(m.delay_minutes)}
+              </td>
             </tr>
           ))}
         </tbody>

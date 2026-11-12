@@ -18,6 +18,7 @@ import {
   type FlightFilters,
 } from '../utils/filters';
 import { delayLabel, flightStatusTone, formatDateLong, isDelayed, localClock, titleCase } from '../utils/format';
+import { hasObservedTimes, sourceLabel } from '../utils/liveData';
 
 type Navigate = (route: RouteName, params?: Record<string, string | null | undefined>) => void;
 
@@ -91,12 +92,22 @@ export function FlightsPage({ params, navigate }: { params: Record<string, strin
                       <button type="button" className="row-link" onClick={() => setSelection({ kind: 'flight', flightId: flight.flight_instance_id })}>
                         <span className="code">{flight.flight_number}</span>
                       </button>
+                      {flight.data_origin === 'IMPORTED' && (
+                        <span className="badge badge--success movement__source" title="From an external source; times are observed, not scheduled">
+                          {sourceLabel(flight.provenance?.data_source, flight.data_origin)}
+                        </span>
+                      )}
+                      {flight.disruption && (
+                        <span className="badge badge--danger movement__source" title={titleCase(flight.disruption.disruption_type)}>Disrupted</span>
+                      )}
                     </td>
                     <td>{flight.origin_airport} → {flight.destination_airport}</td>
                     <td className="mono">{localClock(flight.scheduled_departure_local)}</td>
                     <td className="mono">{localClock(flight.scheduled_arrival_local)}</td>
                     <td><StatusBadge tone={flightStatusTone(flight.status, flight.delay_minutes)}>{titleCase(flight.status)}</StatusBadge></td>
-                    <td className={isDelayed(flight.status, flight.delay_minutes) ? 'text-warning' : 'text-muted'}>{delayLabel(flight.delay_minutes)}</td>
+                    <td className={!hasObservedTimes(flight.provenance) && isDelayed(flight.status, flight.delay_minutes) ? 'text-warning' : 'text-muted'}>
+                      {hasObservedTimes(flight.provenance) ? <span title="No timetable is known for this flight">n/a</span> : delayLabel(flight.delay_minutes)}
+                    </td>
                     <td>{flight.aircraft?.registration ?? '—'} <span className="text-muted">{flight.aircraft?.aircraft_type ?? ''}</span></td>
                     <td className="num">{deps?.up ?? 0} / {deps?.down ?? 0}</td>
                     <td className="actions">

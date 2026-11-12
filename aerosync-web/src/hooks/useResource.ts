@@ -7,6 +7,8 @@ export interface Resource<T> {
   loading: boolean;
   /** Drops the cached value for this key and loads it again. */
   reload: () => void;
+  /** Re-reads the cache for this key (after a background refresh stored a newer value). */
+  sync: () => void;
 }
 
 interface State<T> {
@@ -62,6 +64,8 @@ export function useResource<T>(key: string | null, load: () => Promise<T>): Reso
     setNonce((n) => n + 1);
   }, [key]);
 
+  const sync = useCallback(() => setNonce((n) => n + 1), []);
+
   // While the effect for a new key has not run yet, do not expose the previous key's data.
   const fresh = state.key === key;
   return {
@@ -69,5 +73,6 @@ export function useResource<T>(key: string | null, load: () => Promise<T>): Reso
     error: fresh ? state.error : undefined,
     loading: fresh ? state.loading : key !== null,
     reload,
+    sync,
   };
 }

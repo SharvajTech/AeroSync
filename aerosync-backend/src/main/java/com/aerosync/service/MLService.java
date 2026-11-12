@@ -20,6 +20,10 @@ public class MLService {
     private final WebClient    mlWebClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /** Stage 4: how long one prediction may take before the fallback is used. */
+    @org.springframework.beans.factory.annotation.Value("${ml.service.timeout-seconds:10}")
+    private long timeoutSeconds = 10;
+
     // Constructor injection with @Qualifier
     // tells Spring to inject the mlWebClient bean specifically
     public MLService(@Qualifier("mlWebClient") WebClient mlWebClient) {
@@ -32,7 +36,7 @@ public class MLService {
     // Sends a Map (not a DTO) so WebClient serializes
     // keys exactly as written — snake_case matches Python expectations.
     public FlightPredictionResponse predict(FlightPredictionRequest request) {
-        log.info("Calling ML service for flight: {}",
+        log.debug("Calling ML service for flight: {}",
                 request.getFlightId());
 
         try {
@@ -69,7 +73,7 @@ public class MLService {
                     request.getAircraftType());
 
             // Log exact JSON being sent — helps debug any mismatch
-            log.info("Sending to Python: {}", body);
+            log.debug("Sending to Python: {}", body);
 
             // Send Map as body — keys stay snake_case
             String responseStr = mlWebClient
@@ -98,7 +102,7 @@ public class MLService {
                                     })
                     )
                     .bodyToMono(String.class)
-                    .timeout(java.time.Duration.ofSeconds(10))
+                    .timeout(java.time.Duration.ofSeconds(timeoutSeconds))
                     .block();
 
             if (responseStr == null) {
@@ -107,7 +111,7 @@ public class MLService {
                 return buildFallback(request.getFlightId());
             }
 
-            log.info("ML raw response: {}", responseStr);
+            log.debug("ML raw response: {}", responseStr);
 
             // Parse response manually using JsonNode
             // Avoids any camelCase conversion issues with automatic mapping

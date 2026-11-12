@@ -79,7 +79,7 @@ build with `VITE_API_BASE_URL` pointing at another origin, add that origin to
 | `npm run dev` | Vite dev server with the `/api` proxy |
 | `npm run build` | Type-check (`tsc --noEmit`) and production build into `dist/` |
 | `npm run preview` | Serve `dist/` on port 3000 with the same proxy |
-| `npm test` | Vitest unit and component tests |
+| `npm test` | Vitest unit and component tests (no backend needed; API calls are stubbed) |
 | `npm run typecheck` | TypeScript only |
 
 ## Docker
@@ -124,6 +124,43 @@ without flights shows an empty state with a link to the first date that has data
   hundred flights a day would be unreadable at once); "All day (routes)"
   shows one line per city pair instead.
 
+## Live data and monitoring (Stage 4)
+
+Everything below comes from the backend; the dashboard never simulates a
+live value. See `aerosync-backend/docs/LIVE_DATA.md` for the sources.
+
+- **Status bar** (under the top bar, every page, from `GET /api/system/status`
+  every 30 s): data mode (Synthetic / Hybrid / Live data), each external feed
+  (live aircraft, flight records, weather) with its state and last successful
+  ingestion, the disruption monitor, database or prediction service outages,
+  and when the status was refreshed. When a refresh fails, the last values
+  stay and "Not refreshed since …" is shown.
+- **Airport live panel** (Dashboard and Operations, for the selected airport
+  only): the latest weather **observation** with its time and source, the
+  forecast in a separate block labelled as a prediction, and aircraft within
+  60 km with phase, altitude, speed, distance and age (60 s refresh). A
+  missing source is shown as unavailable or off, never filled in. ATC
+  callsigns are shown without an invented flight number.
+- **Graph**: refreshed in the background every 2 min (the last good data
+  stays on screen if a refresh fails). Flights from an external source are
+  drawn as dark-outlined diamonds, flights with an open disruption get a red
+  ring; the footer shows the number of active disruptions, the data sources
+  and the time of the last refresh. Flight details show the source, callsign,
+  transponder and import time of imported flights, and the open disruption.
+- **Operations → Disruptions**: severity, confidence, delay, who or what
+  detected it (monitor rule, controller, simulation) and when, a "New" badge
+  for the last 15 minutes, auto-refresh every 60 s. Advisory disruptions of
+  network flights have no actions. Only an operations controller of the
+  departure airport sees propose/approve/reject; the backend checks again.
+- **Flights**: source badge per flight; imported flights show "n/a" for the
+  delay because the source has no timetable.
+- **Settings → Data sources**: mode, every feed with interval, last run counts
+  and skip reasons, the monitor, database and prediction service.
+
+Polling pauses while the browser tab is hidden. Live endpoints are never
+cached and always ask for one airport of the user; switching airports drops
+the previous airport's data.
+
 ## Code layout
 
 ```
@@ -133,9 +170,10 @@ src/
   graph/        layout.ts and model.ts (pure: response -> drawable graph), style.ts, NetworkGraph.tsx (Cytoscape)
   components/   layout (sidebar, top bar), common (cards, states, legend), details panels, graph panel
   pages/        one component per route
-  hooks/        resource loading, hash routing, graph scope loading, backend status
-  state/        signed-in airport selection, operating date context, selection and scope types
-  utils/        formatting and filters
+  hooks/        resource loading, polling (Poller), hash routing, graph scope loading, backend status
+  state/        signed-in airport selection, operating date context (with background refresh), system status, selection and scope types
+  components/status, components/live   Stage 4 status bar and airport live panel
+  utils/        formatting, filters, live-data labels (liveData.ts)
   test/         fixtures used only by tests
 ```
 

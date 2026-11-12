@@ -1,6 +1,8 @@
 package com.aerosync.service;
 
+import com.aerosync.datasource.DataSourcePolicy;
 import com.aerosync.dto.FlightPredictionResponse;
+import com.aerosync.model.DataOrigin;
 import com.aerosync.model.Flight;
 import com.aerosync.repository.FlightRepository;
 import com.aerosync.security.AirportScope;
@@ -20,9 +22,15 @@ public class FlightService {
     private final FlightRepository flightRepository;
     private final MLService        mlService;
     private final WeatherService   weatherService;
+    private final DataSourcePolicy dataSourcePolicy;
 
     public List<Flight> getAllFlights() {
-        return flightRepository.findAll();
+        return served(flightRepository.findAll());
+    }
+
+    /** Stage 4: only the flights the configured data mode serves (synthetic rows never in LIVE mode). */
+    private List<Flight> served(List<Flight> flights) {
+        return flights.stream().filter(dataSourcePolicy::serves).toList();
     }
 
     // ── Airport-scoped access (Stage 3) ──────────────────────────────────────
@@ -32,9 +40,10 @@ public class FlightService {
     /** Flights departing from or arriving at an airport in scope. */
     public List<Flight> getFlights(AirportScope scope) {
         if (scope.isUnrestricted()) {
-            return flightRepository.findAll();
+            return served(flightRepository.findAll());
         }
-        return scope.airports().isEmpty() ? List.of() : flightRepository.findTouchingAirports(scope.airports());
+        return scope.airports().isEmpty() ? List.of()
+                : served(flightRepository.findTouchingAirports(scope.airports()));
     }
 
     /** One flight; 403 when it neither departs from nor arrives at an airport in scope. */
@@ -71,32 +80,35 @@ public class FlightService {
 
     /** ML predictions for the flights departing from airports in scope. */
     public int predictFlights(AirportScope scope) {
-        List<Flight> flights = scope.isUnrestricted()
+        List<Flight> flights = served(scope.isUnrestricted()
                 ? flightRepository.findAll()
-                : scope.airports().isEmpty() ? List.of() : flightRepository.findByOriginIn(scope.airports());
+                : scope.airports().isEmpty() ? List.of() : flightRepository.findByOriginIn(scope.airports()));
         predict(flights);
         return flights.size();
     }
 
     public Flight getFlightById(String flightId) {
         return flightRepository.findByFlightId(flightId)
+                .filter(dataSourcePolicy::serves)
                 .orElseThrow(() ->
                     new RuntimeException("Flight not found: " + flightId));
     }
 
     public List<Flight> getFlightsByRisk(String riskLevel) {
-        return flightRepository.findByRiskLevel(riskLevel.toUpperCase());
+        return served(flightRepository.findByRiskLevel(riskLevel.toUpperCase()));
     }
 
     public List<Flight> getDisruptedFlights() {
-        return flightRepository
-                .findByStatus(Flight.FlightStatus.DISRUPTED);
+        return served(flightRepository
+                .findByStatus(Flight.FlightStatus.DISRUPTED));
     }
 
     public Flight createFlight(Flight flight) {
         flight.setCreatedAt(LocalDateTime.now());
         flight.setUpdatedAt(LocalDateTime.now());
         flight.setStatus(Flight.FlightStatus.SCHEDULED);
+        // Entered through the API by a person (never synthetic, never imported).
+        flight.setDataOrigin(DataOrigin.MANUAL);
 
         // Get live weather score for origin airport
         if (flight.getOrigin() != null) {
@@ -134,7 +146,7 @@ public class FlightService {
 
     // ── Predict all flights with live weather ─────────────────────────────────
     public void predictAllFlights() {
-        predict(flightRepository.findAll());
+        predict(served(flightRepository.findAll()));
     }
 
     private void predict(List<Flight> flights) {

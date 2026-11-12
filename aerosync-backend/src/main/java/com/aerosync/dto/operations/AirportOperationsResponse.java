@@ -1,5 +1,6 @@
 package com.aerosync.dto.operations;
 
+import com.aerosync.datasource.DataSourceMode;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;
@@ -22,5 +23,6 @@ public record AirportOperationsResponse(
         AirportOperationsSummaryDto summary,
         List<FlightMovementDto> departures,
         List<FlightMovementDto> arrivals,
-        List<GateDto> gates) {
+        List<GateDto> gates,
+        DataSourceMode dataMode) {
 }

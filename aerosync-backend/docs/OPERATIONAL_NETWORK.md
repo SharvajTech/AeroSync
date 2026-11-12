@@ -12,6 +12,12 @@ AeroSync now has two separate graphs:
 The GNN, its encoders and its training data are not modified. The six extra
 airports exist only in the operational graph.
 
+> **Stage 4.** Flights now carry their provenance (`data_source`,
+> `schedule_basis`, `source_record_id`, ...), the graph can include flights
+> imported from OpenSky next to synthetic ones depending on
+> `AEROSYNC_DATA_MODE`, and flight nodes carry their open disruption. See
+> [`LIVE_DATA.md`](LIVE_DATA.md).
+
 ## Graph model
 
 ```

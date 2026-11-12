@@ -8,7 +8,7 @@ services:
       POSTGRES_USER:     ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -53,6 +53,15 @@ services:
       JWT_SECRET: ${JWT_SECRET:-}
       JWT_EXPIRATION: ${JWT_EXPIRATION:-28800000}
       WEATHER_API_KEY: ${WEATHER_API_KEY:-}
+      # Stage 4: SYNTHETIC (default, no external flight data), LIVE or HYBRID.
+      AEROSYNC_DATA_MODE: ${AEROSYNC_DATA_MODE:-SYNTHETIC}
+      # OpenSky OAuth2 client credentials (LIVE/HYBRID). Both empty = anonymous
+      # access with a small daily credit budget. Set them in .env, never here.
+      OPENSKY_CLIENT_ID: ${OPENSKY_CLIENT_ID:-}
+      OPENSKY_CLIENT_SECRET: ${OPENSKY_CLIENT_SECRET:-}
+      OPENSKY_STATES_POLL_SECONDS: ${OPENSKY_STATES_POLL_SECONDS:-300}
+      AEROSYNC_MONITORING_ENABLED: ${AEROSYNC_MONITORING_ENABLED:-true}
+      AEROSYNC_LOG_LEVEL: ${AEROSYNC_LOG_LEVEL:-INFO}
       # Development-only demo accounts (off unless enabled in .env; no default password).
       AEROSYNC_DEMO_USERS_ENABLED: ${AEROSYNC_DEMO_USERS_ENABLED:-false}
       AEROSYNC_DEMO_PASSWORD: ${AEROSYNC_DEMO_PASSWORD:-}

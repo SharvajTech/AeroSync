@@ -1,7 +1,11 @@
 package com.aerosync.service;
 
+import com.aerosync.datasource.DataSourcePolicy;
 import com.aerosync.dto.graph.DataWindowDto;
+import com.aerosync.dto.graph.FlightDisruptionDto;
+import com.aerosync.dto.graph.FlightNodeDto;
 import com.aerosync.dto.graph.FlightReachDto;
+import com.aerosync.dto.graph.GraphNodeDto;
 import com.aerosync.dto.graph.GraphResponse;
 import com.aerosync.dto.graph.TraversalDto;
 import com.aerosync.exception.InvalidRequestParameterException;
@@ -16,11 +20,14 @@ import com.aerosync.graph.GraphView;
 import com.aerosync.graph.NetworkIdentifiers;
 import com.aerosync.graph.OperationalGraph;
 import com.aerosync.model.Airport;
+import com.aerosync.model.DataOrigin;
 import com.aerosync.model.DependencyType;
+import com.aerosync.model.Disruption;
 import com.aerosync.model.FlightDependency;
 import com.aerosync.model.FlightInstance;
 import com.aerosync.model.FlightSchedule;
 import com.aerosync.repository.AirportRepository;
+import com.aerosync.repository.DisruptionRepository;
 import com.aerosync.repository.FlightDependencyRepository;
 import com.aerosync.repository.FlightInstanceRepository;
 import com.aerosync.repository.FlightScheduleRepository;
@@ -42,6 +49,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
 /**
@@ -79,6 +87,8 @@ public class OperationalGraphService {
     private final FlightScheduleRepository flightScheduleRepository;
     private final FlightInstanceRepository flightInstanceRepository;
     private final FlightDependencyRepository flightDependencyRepository;
+    private final DisruptionRepository disruptionRepository;
+    private final DataSourcePolicy dataSourcePolicy;
 
     /** Zone that defines "today" for the national network when no date is given. */
     @Value("${aerosync.operations.timezone:Asia/Kolkata}")
@@ -105,13 +115,14 @@ public class OperationalGraphService {
             airportRepository.findAllByOrderByIataCodeAsc()
                     .forEach(airport -> all.addAirport(OperationalRecordMapper.toRecord(airport)));
             builder = all;
-            flights = flightInstanceRepository.findGraphFlightsByServiceDate(day);
+            flights = served(flightInstanceRepository.findGraphFlightsByServiceDate(day));
         } else {
             builder = registeredAirportsBuilder();
             scope.airports().forEach(builder::includeAirport);
             flights = scope.airports().isEmpty()
                     ? List.of()
-                    : flightInstanceRepository.findGraphFlightsByServiceDateTouchingAirports(day, scope.airports());
+                    : served(flightInstanceRepository.findGraphFlightsByServiceDateTouchingAirports(
+                            day, scope.airports()));
         }
         flights.forEach(flight -> builder.addFlight(OperationalRecordMapper.toRecord(flight)));
         if (includeDependencies && !flights.isEmpty()) {
@@ -145,8 +156,8 @@ public class OperationalGraphService {
 
         GraphBuilder builder = registeredAirportsBuilder();
         builder.includeAirport(airport.getIataCode());
-        List<FlightInstance> flights =
-                flightInstanceRepository.findAirportMovements(airport.getIataCode(), windowStart, windowEnd);
+        List<FlightInstance> flights = served(
+                flightInstanceRepository.findAirportMovements(airport.getIataCode(), windowStart, windowEnd));
         flights.forEach(flight -> builder.addFlight(OperationalRecordMapper.toRecord(flight)));
         if (includeDependencies && !flights.isEmpty()) {
             Set<UUID> flightIds = new LinkedHashSet<>();
@@ -299,6 +310,7 @@ public class OperationalGraphService {
 
     private FlightInstance requireFlight(UUID flightId, AirportScope scope) {
         FlightInstance flight = flightInstanceRepository.findGraphFlightById(flightId)
+                .filter(dataSourcePolicy::serves)
                 .orElseThrow(() -> new ResourceNotFoundException("Flight instance " + flightId + " not found"));
         FlightSchedule schedule = flight.getSchedule();
         scope.requireView(schedule.getOrigin().getIataCode(), schedule.getDestination().getIataCode(),
@@ -306,8 +318,14 @@ public class OperationalGraphService {
         return flight;
     }
 
-    /** A flight is visible when it departs from or arrives at an airport in scope. */
-    private static boolean visible(FlightInstance flight, AirportScope scope) {
+    /**
+     * A flight is visible when the configured data mode serves its origin
+     * (Stage 4) and it departs from or arrives at an airport in scope.
+     */
+    private boolean visible(FlightInstance flight, AirportScope scope) {
+        if (!dataSourcePolicy.serves(flight)) {
+            return false;
+        }
         if (scope.isUnrestricted()) {
             return true;
         }
@@ -316,9 +334,13 @@ public class OperationalGraphService {
     }
 
     /** A dependency is visible only when both of its flights are. */
-    private static boolean visible(FlightDependency dependency, AirportScope scope) {
-        return scope.isUnrestricted()
-                || (visible(dependency.getSourceFlight(), scope) && visible(dependency.getTargetFlight(), scope));
+    private boolean visible(FlightDependency dependency, AirportScope scope) {
+        return visible(dependency.getSourceFlight(), scope) && visible(dependency.getTargetFlight(), scope);
+    }
+
+    /** The flights the configured data mode serves (synthetic records never appear in LIVE mode). */
+    private List<FlightInstance> served(List<FlightInstance> flights) {
+        return flights.stream().filter(dataSourcePolicy::serves).toList();
     }
 
     private GraphBuilder registeredAirportsBuilder() {
@@ -377,19 +399,71 @@ public class OperationalGraphService {
         return reach;
     }
 
+    /** First and last service date with flights the configured data mode serves. */
     private DataWindowDto dataWindow() {
-        LocalDate first = flightScheduleRepository.findFirstByOrderByServiceDateAsc()
+        List<DataOrigin> origins = dataSourcePolicy.servedOrigins();
+        LocalDate first = flightScheduleRepository.findFirstByDataOriginInOrderByServiceDateAsc(origins)
                 .map(FlightSchedule::getServiceDate).orElse(null);
-        LocalDate last = flightScheduleRepository.findFirstByOrderByServiceDateDesc()
+        LocalDate last = flightScheduleRepository.findFirstByDataOriginInOrderByServiceDateDesc(origins)
                 .map(FlightSchedule::getServiceDate).orElse(null);
         return new DataWindowDto(first, last);
     }
 
-    private static GraphResponse response(GraphView view, String focusNodeId, LocalDate serviceDate,
-                                          DataWindowDto dataWindow, OperationalGraph graph, TraversalDto traversal) {
+    private GraphResponse response(GraphView view, String focusNodeId, LocalDate serviceDate,
+                                   DataWindowDto dataWindow, OperationalGraph graph, TraversalDto traversal) {
+        List<GraphNodeDto> nodes = withOpenDisruptions(graph.nodes());
+        Set<String> sources = new TreeSet<>();
+        for (GraphNodeDto node : nodes) {
+            if (node instanceof FlightNodeDto flight && flight.provenance() != null
+                    && flight.provenance().dataSource() != null) {
+                sources.add(flight.provenance().dataSource());
+            }
+        }
         return new GraphResponse(view, focusNodeId, serviceDate, dataWindow, graph.syntheticData(),
                 graph.syntheticData() ? SYNTHETIC_DATA_NOTICE : null, traversal, graph.summary(),
-                graph.nodes(), graph.edges());
+                nodes, graph.edges(), dataSourcePolicy.mode(), List.copyOf(sources));
+    }
+
+    /**
+     * Attaches the open disruption of each flight node (Stage 4) so the graph
+     * can highlight it. Every node here is already visible to the caller, and
+     * a disruption belongs to its flight, so nothing outside the scope is added.
+     */
+    private List<GraphNodeDto> withOpenDisruptions(List<GraphNodeDto> nodes) {
+        Set<UUID> flightIds = new LinkedHashSet<>();
+        for (GraphNodeDto node : nodes) {
+            if (node instanceof FlightNodeDto flight) {
+                flightIds.add(flight.flightInstanceId());
+            }
+        }
+        if (flightIds.isEmpty()) {
+            return nodes;
+        }
+        Map<UUID, Disruption> open = new LinkedHashMap<>();
+        for (List<UUID> chunk : chunks(flightIds)) {
+            for (Disruption disruption
+                    : disruptionRepository.findByFlightInstanceIdInAndStatusIn(chunk, Disruption.OPEN_STATUSES)) {
+                open.merge(disruption.getFlightInstanceId(), disruption, OperationalGraphService::moreSevere);
+            }
+        }
+        if (open.isEmpty()) {
+            return nodes;
+        }
+        List<GraphNodeDto> annotated = new ArrayList<>(nodes.size());
+        for (GraphNodeDto node : nodes) {
+            if (node instanceof FlightNodeDto flight && open.containsKey(flight.flightInstanceId())) {
+                annotated.add(flight.withDisruption(FlightDisruptionDto.of(open.get(flight.flightInstanceId()))));
+            } else {
+                annotated.add(node);
+            }
+        }
+        return annotated;
+    }
+
+    private static Disruption moreSevere(Disruption a, Disruption b) {
+        int severityA = a.getSeverity() == null ? -1 : a.getSeverity().ordinal();
+        int severityB = b.getSeverity() == null ? -1 : b.getSeverity().ordinal();
+        return severityB > severityA ? b : a;
     }
 
     private static List<List<UUID>> chunks(Set<UUID> ids) {

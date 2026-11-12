@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { LuLink, LuPlaneTakeoff, LuTowerControl, LuWaypoints } from 'react-icons/lu';
 import { GraphExplorer } from '../components/GraphExplorer';
 import { MetricCards, type Metric } from '../components/common/MetricCards';
+import { AirportLivePanel } from '../components/live/AirportLivePanel';
 import { ErrorState } from '../components/common/States';
 import { PageHeader } from '../components/layout/PageHeader';
 import type { RouteName } from '../hooks/useHashRoute';
@@ -59,6 +60,7 @@ export function DashboardPage({ navigate }: { navigate: (route: RouteName, param
         onSelect={setSelection}
         navigate={navigate}
       />
+      <AirportLivePanel airport={airport.iata_code} />
     </>
   );
 }

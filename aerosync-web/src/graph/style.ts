@@ -14,6 +14,8 @@ export const GRAPH_COLORS = {
   labelMuted: '#4B5563',
   halo: '#2563EB',
   upstream: '#64748B',
+  /** Outline of flights that come from an external source (Stage 4). */
+  external: '#0F172A',
   downstream: '#EA580C',
   dependency: {
     AIRCRAFT_ROTATION: '#EA580C',
@@ -82,6 +84,16 @@ export function graphStylesheet(): cytoscape.StylesheetJson {
     { selector: 'node[context = "yes"]', style: { 'background-opacity': 0.45, 'font-weight': 500 } },
     { selector: 'node[tone = "warning"]', style: { 'background-color': GRAPH_COLORS.warning } },
     { selector: 'node[tone = "critical"]', style: { 'background-color': GRAPH_COLORS.critical } },
+    // Stage 4: flights from an external source have a dark outline, flights with an
+    // open disruption a red ring (drawn after the tone so both remain visible).
+    {
+      selector: 'node[kind = "flight"][external = "yes"]',
+      style: { 'border-width': 2, 'border-color': GRAPH_COLORS.external, shape: 'diamond', width: 11, height: 11 },
+    },
+    {
+      selector: 'node[kind = "flight"][disrupted = "yes"]',
+      style: { 'border-width': 3, 'border-color': GRAPH_COLORS.critical, width: 12, height: 12, 'z-index': 15 },
+    },
     {
       selector: 'node[role = "upstream"]',
       style: { 'border-width': 3, 'border-color': GRAPH_COLORS.upstream },

@@ -28,6 +28,10 @@ export interface VisualNode {
   role?: TraversalRole;
   /** Shown only because it shares a dependency with a flight in the selected time window. */
   context?: boolean;
+  /** Stage 4: the flight has an open disruption (drawn with a red ring). */
+  disrupted?: boolean;
+  /** Stage 4: the flight comes from an external source, not from the synthetic generator. */
+  external?: boolean;
   ref: AirportNode | FlightNode;
 }
 
@@ -76,6 +80,32 @@ export function flightNodes(response: GraphResponse | undefined): FlightNode[] {
 export function flightTone(flight: FlightNode): NodeTone {
   if (flight.status === 'CANCELLED' || flight.status === 'DIVERTED') return 'critical';
   return isDelayed(flight.status, flight.delay_minutes) ? 'warning' : 'normal';
+}
+
+/** True when the backend attached an open disruption to the flight (Stage 4). */
+export function hasOpenDisruption(flight: FlightNode): boolean {
+  return Boolean(flight.disruption) && flight.disruption?.status !== 'RESOLVED';
+}
+
+/** Flights with an open disruption, most severe first (for lists next to the graph). */
+export function disruptedFlights(response: GraphResponse | undefined): FlightNode[] {
+  const rank: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+  return flightNodes(response)
+    .filter(hasOpenDisruption)
+    .sort((a, b) =>
+      (rank[a.disruption?.severity ?? ''] ?? 4) - (rank[b.disruption?.severity ?? ''] ?? 4)
+      || a.flight_number.localeCompare(b.flight_number));
+}
+
+/** Distinct data sources of the flights in a response, e.g. ["OPENSKY", "SYNTHETIC_GENERATOR"]. */
+export function dataSources(response: GraphResponse | undefined): string[] {
+  if (!response) return [];
+  if (response.data_sources) return [...response.data_sources].sort();
+  const sources = new Set<string>();
+  flightNodes(response).forEach((f) => {
+    if (f.provenance?.data_source) sources.add(f.provenance.data_source);
+  });
+  return [...sources].sort();
 }
 
 export function airportTone(airport: AirportNode): NodeTone {
@@ -149,6 +179,8 @@ export function buildFlightGraph(response: GraphResponse, options: FlightGraphOp
       tone: flightTone(flight),
       role: roles.get(flight.id),
       context: contextIds.has(flight.id) || undefined,
+      disrupted: hasOpenDisruption(flight) || undefined,
+      external: flight.data_origin === 'IMPORTED' || undefined,
       ref: flight,
     })),
   ];
